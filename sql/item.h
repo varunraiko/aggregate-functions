@@ -1432,15 +1432,6 @@ public:
      (*traverser)(this, arg);
    }
 
-  /*
-    This is used to get the most recent version of any function in
-    an item tree. The version is the version where a MySQL function
-    was introduced in. So any function which is added should use
-    this function and set the int_arg to maximum of the input data
-    and their own version info.
-  */
-  virtual bool intro_version(uchar *int_arg) { return 0; }
-
   virtual bool remove_dependence_processor(uchar * arg) { return 0; }
   virtual bool cleanup_processor(uchar *arg);
   virtual bool collect_item_field_processor(uchar * arg) { return 0; }

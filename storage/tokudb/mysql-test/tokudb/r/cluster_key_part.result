@@ -12,8 +12,8 @@ t	CREATE TABLE `t` (
   `y` int(11) NOT NULL,
   PRIMARY KEY (`x`)
 ) ENGINE=TokuDB DEFAULT CHARSET=latin1
-/*!50100 PARTITION BY HASH (x)
-PARTITIONS 2 */
+ PARTITION BY HASH (x)
+PARTITIONS 2
 alter table t add clustering key(y);
 show create table t;
 Table	Create Table
@@ -23,6 +23,6 @@ t	CREATE TABLE `t` (
   PRIMARY KEY (`x`),
   CLUSTERING KEY `y` (`y`)
 ) ENGINE=TokuDB DEFAULT CHARSET=latin1
-/*!50100 PARTITION BY HASH (x)
-PARTITIONS 2 */
+ PARTITION BY HASH (x)
+PARTITIONS 2
 drop table t;
