@@ -636,17 +636,21 @@ struct TABLE_SHARE
     the record then this value is 0.
   */
   uint null_bytes_for_compare;
+
   uint fields;				/* Number of fields */
   /* Number of stored fields, generated-only virtual fields are not included */
   uint stored_fields;                   
+  uint vfields;                         /* Number of computed (virtual) fields */
+  uint default_fields;                  /* Number of default fields */
+  uint null_fields;			/* number of null fields */
+  uint blob_fields;			/* number of blob fields */
+  uint varchar_fields;                  /* number of varchar fields */
+
   uint rec_buff_length;                 /* Size of table->record[] buffer */
   uint keys, key_parts;
   uint ext_key_parts;       /* Total number of key parts in extended keys */
   uint max_key_length, max_unique_length, total_key_length;
   uint uniques;                         /* Number of UNIQUE index */
-  uint null_fields;			/* number of null fields */
-  uint blob_fields;			/* number of blob fields */
-  uint varchar_fields;                  /* number of varchar fields */
   uint db_create_options;		/* Create options from database */
   uint db_options_in_use;		/* Options in use */
   uint db_record_offset;		/* if HA_REC_IN_SEQ */
@@ -660,8 +664,6 @@ struct TABLE_SHARE
   uint open_errno;                      /* error from open_table_def() */
   uint column_bitmap_size;
   uchar frm_version;
-  uint vfields;                         /* Number of computed (virtual) fields */
-  uint default_fields;                  /* Number of default fields */
   bool use_ext_keys;                    /* Extended keys can be used */
   bool null_field_first;
   bool system;                          /* Set if system table (one record) */
@@ -1015,7 +1017,6 @@ public:
   THD	*in_use;                        /* Which thread uses this */
   /* Time when table was released to table cache. Valid for unused tables. */
   ulonglong tc_time;
-  Field **field;			/* Pointer to fields */
 
   uchar *record[2];			/* Pointer to records */
   uchar *write_row_record;		/* Used as optimisation in
@@ -1045,11 +1046,11 @@ public:
   key_map keys_in_use_for_order_by;
   KEY  *key_info;			/* data of keys in database */
 
+  Field **field;			/* Pointer to fields */
+  Field **vfield;                       /* Pointer to virtual fields*/
+  Field **default_field;                /* with DEFAULT NOW or ON UPDATE NOW */
   Field *next_number_field;		/* Set if next_number is activated */
   Field *found_next_number_field;	/* Set on open */
-  Field **vfield;                       /* Pointer to virtual fields*/
-  /* Fields that are updated automatically on INSERT or UPDATE. */
-  Field **default_field;
 
   /* Table's triggers, 0 if there are no of them */
   Table_triggers_list *triggers;
