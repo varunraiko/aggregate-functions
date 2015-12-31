@@ -2489,12 +2489,8 @@ TABLE *Delayed_insert::get_local_table(THD* client_thd)
       if ((*field)->vcol_info)
       {
         bool error_reported= FALSE;
-        if (unpack_vcol_info_from_frm(client_thd,
-                                      client_thd->mem_root,
-                                      copy,
-                                      *field,
-                                      &(*field)->vcol_info->expr_str,
-                                      &error_reported))
+        if (unpack_vcol_info_from_frm(client_thd, client_thd->mem_root,
+                                      copy, *field, &error_reported))
           goto error;
         *vfield++= *field;
       }

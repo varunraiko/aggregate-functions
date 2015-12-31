@@ -2567,9 +2567,8 @@ enum open_frm_error open_table_from_share(THD *thd, TABLE_SHARE *share,
                        const char *alias, uint db_stat, uint prgflag,
                        uint ha_open_flags, TABLE *outparam,
                        bool is_create_table);
-bool unpack_vcol_info_from_frm(THD *thd, MEM_ROOT *mem_root,
-                               TABLE *table, Field *field,
-                               LEX_STRING *vcol_expr, bool *error_reported);
+bool unpack_vcol_info_from_frm(THD *thd, MEM_ROOT *mem_root, TABLE *table,
+                               Field *field, bool *error_reported);
 TABLE_SHARE *alloc_table_share(const char *db, const char *table_name,
                                const char *key, uint key_length);
 void init_tmp_table_share(THD *thd, TABLE_SHARE *share, const char *key,
