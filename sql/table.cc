@@ -1378,8 +1378,10 @@ int TABLE_SHARE::init_from_binary_frm_image(THD *thd, bool write,
                                      share->comment.length);
   }
 
-  DBUG_PRINT("info",("i_count: %d  i_parts: %d  index: %d  n_length: %d  int_length: %d  com_length: %d  vcol_screen_length: %d", interval_count,interval_parts, keys,n_length,int_length, com_length, vcol_screen_length));
-
+  DBUG_PRINT("info",("i_count: %d  i_parts: %d  index: %d  n_length: %d "
+                     "int_length: %d  com_length: %d  vcol_screen_length: %d",
+                     interval_count,interval_parts, keys,n_length,int_length,
+                     com_length, vcol_screen_length));
 
   if (!(field_ptr = (Field **)
 	alloc_root(&share->mem_root,
@@ -1487,7 +1489,6 @@ int TABLE_SHARE::init_from_binary_frm_image(THD *thd, bool write,
     Field::geometry_type geom_type= Field::GEOM_GEOMETRY;
     LEX_STRING comment;
     Virtual_column_info *vcol_info= 0;
-    bool fld_stored_in_db= TRUE;
     uint gis_length, gis_decimals, srid= 0;
 
     if (new_frm_ver >= 3)
@@ -1574,7 +1575,7 @@ int TABLE_SHARE::init_from_binary_frm_image(THD *thd, bool write,
           [byte 4]    = optional interval_id for sql_type (only if byte 1 == 2) 
           next byte ...  = virtual column expression (text data)
         */
-        vcol_info= new Virtual_column_info();
+        vcol_info= new (&share->mem_root) Virtual_column_info();
         bool opt_interval_id= (uint)vcol_screen_pos[0] == 2;
         field_type= (enum_field_types) (uchar) vcol_screen_pos[1];
         if (opt_interval_id)
@@ -1582,7 +1583,7 @@ int TABLE_SHARE::init_from_binary_frm_image(THD *thd, bool write,
         else if ((uint)vcol_screen_pos[0] != 1)
           goto err;
 
-        fld_stored_in_db= (bool) (uint) vcol_screen_pos[2];
+        vcol_info->stored_in_db= vcol_screen_pos[2];
         vcol_expr_length= vcol_info_length -
                           (uint)(FRM_VCOL_HEADER_SIZE(opt_interval_id));
         if (!(vcol_info->expr_str.str=
@@ -1686,10 +1687,6 @@ int TABLE_SHARE::init_from_binary_frm_image(THD *thd, bool write,
     reg_field->field_index= i;
     reg_field->comment=comment;
     reg_field->vcol_info= vcol_info;
-    if (vcol_info)
-      reg_field->vcol_info->stored_in_db= fld_stored_in_db;
-    else
-      DBUG_ASSERT(fld_stored_in_db == true);
     if (field_type == MYSQL_TYPE_BIT && !f_bit_as_char(pack_flag))
     {
       null_bits_are_used= 1;
