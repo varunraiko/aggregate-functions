@@ -932,7 +932,6 @@ int TABLE_SHARE::init_from_binary_frm_image(THD *thd, bool write,
   uint interval_count, interval_parts, read_length, int_length;
   uint db_create_options, keys, key_parts, n_length;
   uint com_length, null_bit_pos;
-  uint extra_rec_buf_length;
   uint i;
   bool use_hash;
   char *keynames, *names, *comment_pos;
@@ -1348,8 +1347,7 @@ int TABLE_SHARE::init_from_binary_frm_image(THD *thd, bool write,
   if (share->db_plugin && !plugin_equals(share->db_plugin, se_plugin))
     goto err; // wrong engine (someone changed the frm under our feet?)
 
-  extra_rec_buf_length= uint2korr(frm_image+59);
-  rec_buff_length= ALIGN_SIZE(share->reclength + 1 + extra_rec_buf_length);
+  rec_buff_length= ALIGN_SIZE(share->reclength + 1);
   share->rec_buff_length= rec_buff_length;
   if (!(record= (uchar *) alloc_root(&share->mem_root,
                                      rec_buff_length)))
@@ -3389,7 +3387,7 @@ void prepare_frm_header(THD *thd, uint reclength, uchar *fileinfo,
   int4store(fileinfo+51, tmp);
   int4store(fileinfo+55, create_info->extra_size);
   /*
-    59-60 is reserved for extra_rec_buf_length,
+    59-60 is unused since 10.2
     61 for default_part_db_type
   */
   int2store(fileinfo+62, create_info->key_block_size);
