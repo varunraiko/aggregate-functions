@@ -3582,7 +3582,7 @@ double get_column_avg_frequency(Field * field)
     return res;
   }
  
-  Column_statistics *col_stats= table->s->field[field->field_index]->read_stats;
+  Column_statistics *col_stats= field->read_stats;
 
   if (!col_stats)
     res= table->stat_records();
@@ -3620,7 +3620,7 @@ double get_column_range_cardinality(Field *field,
 {
   double res;
   TABLE *table= field->table;
-  Column_statistics *col_stats= table->field[field->field_index]->read_stats;
+  Column_statistics *col_stats= field->read_stats;
   double tab_records= table->stat_records();
 
   if (!col_stats)
