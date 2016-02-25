@@ -927,7 +927,7 @@ create table t1 (a int);
 create view v1 as select a from t1 procedure analyse();
 ERROR HY000: View's SELECT contains a 'PROCEDURE' clause
 create view v1 as select 1 from (select 1) as d1;
-ERROR HY000: View's SELECT contains a subquery in the FROM clause
+drop view v1;
 drop table t1;
 create table t1 (s1 int, primary key (s1));
 create view v1 as select * from t1;
@@ -3196,15 +3196,11 @@ code	COUNT(DISTINCT country)
 DROP VIEW v1;
 DROP TABLE t1;
 DROP VIEW IF EXISTS v1;
-SELECT * FROM (SELECT 1) AS t;
-1
-1
-CREATE VIEW v1 AS SELECT * FROM (SELECT 1) AS t;
-ERROR HY000: View's SELECT contains a subquery in the FROM clause
+SELECT * FROM (SELECT 1) AS t into @w;
+CREATE VIEW v1 AS SELECT * FROM (SELECT 1) AS t into @w;
+ERROR HY000: View's SELECT contains a 'INTO' clause
 # Previously the following would fail.
-SELECT * FROM (SELECT 1) AS t;
-1
-1
+SELECT * FROM (SELECT 1) AS t into @w;
 drop view if exists view_24532_a;
 drop view if exists view_24532_b;
 drop table if exists table_24532;
@@ -5911,6 +5907,219 @@ t3	CREATE TABLE `t3` (
 ) ENGINE=MyISAM DEFAULT CHARSET=latin1
 DROP VIEW v1;
 DROP TABLE t1,t2,t3;
+#
+# MDEV-3944: Allow derived tables in VIEWS
+#
+create table t1 (s1 int);
+insert into t1 values (1),(2),(3);
+CREATE VIEW v1 AS SELECT * FROM (SELECT s1 FROM t1 WHERE s1>1) AS x;
+CREATE VIEW v2 AS SELECT * FROM (SELECT s1 FROM t1 WHERE s1<3) AS x;
+select * from v1;
+s1
+2
+3
+select * from v2;
+s1
+1
+2
+select * from v1 natural join v2;
+s1
+2
+select * from v1 natural join t1;
+s1
+2
+3
+select * from v1 natural join (SELECT s1 FROM t1 WHERE s1<3) as x;
+s1
+2
+select * from v1 left join v2 on (v1.s1=v2.s1);
+s1	s1
+2	2
+3	NULL
+select * from v1 left join t1 on (v1.s1=t1.s1);
+s1	s1
+2	2
+3	3
+select * from t1 left join v2 on (t1.s1=v2.s1);
+s1	s1
+1	1
+2	2
+3	NULL
+select * from v1 left join (SELECT s1 FROM t1 WHERE s1<3) as x on (v1.s1=x.s1);
+s1	s1
+2	2
+3	NULL
+select * from (SELECT s1 FROM t1 WHERE s1>1) AS x left join v2 on (x.s1=v2.s1);
+s1	s1
+2	2
+3	NULL
+drop view v1,v2;
+CREATE VIEW v1 AS SELECT * FROM (SELECT s1 FROM (SELECT s1 FROM t1 WHERE s1
+< 100) as xx WHERE s1>1) AS x;
+CREATE VIEW v2 AS SELECT * FROM (SELECT s1 FROM (SELECT s1 FROM t1 WHERE s1
+> -100) as xx WHERE s1<3) AS x;
+insert into t1 values (200),(-200);
+select * from t1;
+s1
+-200
+1
+2
+200
+3
+select * from v1;
+s1
+2
+3
+select * from v2;
+s1
+1
+2
+select * from v1 natural join v2;
+s1
+2
+select * from v1 natural join t1;
+s1
+2
+3
+select * from v1 natural join (SELECT s1 FROM t1 WHERE s1<3) as x;
+s1
+2
+select * from v1 left join v2 on (v1.s1=v2.s1);
+s1	s1
+2	2
+3	NULL
+select * from v1 left join t1 on (v1.s1=t1.s1);
+s1	s1
+2	2
+3	3
+select * from t1 left join v2 on (t1.s1=v2.s1);
+s1	s1
+-200	NULL
+1	1
+2	2
+200	NULL
+3	NULL
+select * from v1 left join (SELECT s1 FROM t1 WHERE s1<3) as x on (v1.s1=x.s1);
+s1	s1
+2	2
+3	NULL
+select * from (SELECT s1 FROM t1 WHERE s1>1) AS x left join v2 on (x.s1=v2.s1);
+s1	s1
+2	2
+200	NULL
+3	NULL
+drop view v1,v2;
+CREATE algorithm=temptable VIEW v1 AS SELECT * FROM (SELECT s1 FROM (SELECT s1 FROM t1 WHERE s1
+< 100) as xx WHERE s1>1) AS x;
+CREATE algorithm=temptable VIEW v2 AS SELECT * FROM (SELECT s1 FROM (SELECT s1 FROM t1 WHERE s1
+> -100) as xx WHERE s1<3) AS x;
+select * from t1;
+s1
+-200
+1
+2
+200
+3
+select * from v1;
+s1
+2
+3
+select * from v2;
+s1
+1
+2
+select * from v1 natural join v2;
+s1
+2
+select * from v1 natural join t1;
+s1
+2
+3
+select * from v1 natural join (SELECT s1 FROM t1 WHERE s1<3) as x;
+s1
+2
+select * from v1 left join v2 on (v1.s1=v2.s1);
+s1	s1
+2	2
+3	NULL
+select * from v1 left join t1 on (v1.s1=t1.s1);
+s1	s1
+2	2
+3	3
+select * from t1 left join v2 on (t1.s1=v2.s1);
+s1	s1
+-200	NULL
+1	1
+2	2
+200	NULL
+3	NULL
+select * from v1 left join (SELECT s1 FROM t1 WHERE s1<3) as x on (v1.s1=x.s1);
+s1	s1
+2	2
+3	NULL
+select * from (SELECT s1 FROM t1 WHERE s1>1) AS x left join v2 on (x.s1=v2.s1);
+s1	s1
+2	2
+200	NULL
+3	NULL
+drop view v1,v2;
+CREATE VIEW v1 AS SELECT * FROM (SELECT s1 FROM (SELECT s1 FROM t1 WHERE s1
+< 100) as xx WHERE s1>1) AS x;
+insert into v1 values (-300);
+ERROR HY000: The target table v1 of the INSERT is not insertable-into
+update v1 set s1=s1+1;
+ERROR HY000: The target table v1 of the UPDATE is not updatable
+drop view v1;
+CREATE VIEW v1 AS SELECT s1,s2 FROM (SELECT s1 as s2 FROM t1 WHERE s1 <
+100) x, t1 WHERE t1.s1=x.s2;
+select * from v1;
+s1	s2
+1	1
+2	2
+3	3
+-200	-200
+insert into v1 (s1) values (-300);
+update v1 set s1=s1+1;
+select * from v1;
+s1	s2
+2	2
+3	3
+4	4
+-199	-199
+-299	-299
+select * from t1;
+s1
+2
+3
+4
+200
+-199
+-299
+insert into v1(s2) values (-300);
+ERROR HY000: The target table v1 of the INSERT is not insertable-into
+update v1 set s2=s2+1;
+ERROR HY000: The target table x of the UPDATE is not updatable
+drop view v1;
+CREATE VIEW v1 AS SELECT * FROM (SELECT s1 FROM t1 WHERE s1
+< 100) AS x;
+insert into v1 values (-300);
+ERROR HY000: The target table v1 of the INSERT is not insertable-into
+update v1 set s1=s1+1;
+ERROR HY000: The target table v1 of the UPDATE is not updatable
+drop view v1;
+CREATE VIEW v1 AS SELECT * FROM (SELECT s1 FROM (SELECT s1 FROM t1 WHERE s1
+< 100) as xx WHERE s1>1) AS x;
+insert into v1 values (-300);
+ERROR HY000: The target table v1 of the INSERT is not insertable-into
+update v1 set s1=s1+1;
+ERROR HY000: The target table v1 of the UPDATE is not updatable
+create view v2 as select * from v1;
+insert into v2 values (-300);
+ERROR HY000: The target table v2 of the INSERT is not insertable-into
+update v2 set s1=s1+1;
+ERROR HY000: The target table v2 of the UPDATE is not updatable
+drop view v1, v2;
+drop table t1;
 #
 # End of 10.2 tests
 #

@@ -11079,12 +11079,6 @@ select_derived_init:
           {
             LEX *lex= Lex;
 
-            if (! lex->parsing_options.allows_derived)
-            {
-              my_error(ER_VIEW_SELECT_DERIVED, MYF(0));
-              MYSQL_YYABORT;
-            }
-
             SELECT_LEX *sel= lex->current_select;
             TABLE_LIST *embedding;
             if (!sel->embedding || sel->end_nested_join(lex->thd))
@@ -16210,7 +16204,6 @@ view_select:
             lex->parsing_options.allows_variable= FALSE;
             lex->parsing_options.allows_select_into= FALSE;
             lex->parsing_options.allows_select_procedure= FALSE;
-            lex->parsing_options.allows_derived= FALSE;
             lex->create_view_select.str= (char *) YYLIP->get_cpp_ptr();
           }
           view_select_aux view_check_option
@@ -16224,7 +16217,6 @@ view_select:
             lex->parsing_options.allows_variable= TRUE;
             lex->parsing_options.allows_select_into= TRUE;
             lex->parsing_options.allows_select_procedure= TRUE;
-            lex->parsing_options.allows_derived= TRUE;
           }
         ;
 
