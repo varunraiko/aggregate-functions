@@ -5909,6 +5909,29 @@ update v2 set s1=s1+1;
 
 drop view v1, v2;
 drop table t1;
+
+--echo #
+--echo # MDEV-9671:Wrong result upon select from a view with a FROM subquery
+--echo #
+CREATE TABLE t1 (i INT);
+INSERT INTO t1 VALUES (3),(2);
+
+CREATE TABLE t2 (j INT);
+INSERT INTO t2 VALUES (8),(3),(3);
+
+CREATE TABLE t3 (k INT);
+INSERT INTO t3 VALUES (1),(8);
+
+CREATE VIEW v1 AS SELECT * FROM t1 LEFT JOIN ( SELECT t2.* FROM t2 INNER JOIN t3 ON ( k = j ) ) AS alias1 ON ( i = j );
+
+show create view v1;
+
+SELECT * FROM t1 LEFT JOIN ( SELECT t2.* FROM t2 INNER JOIN t3 ON ( k = j ) ) AS alias1 ON ( i = j );
+
+SELECT * FROM v1;
+
+DROP VIEW v1;
+DROP TABLE t1, t2, t3;
 --echo #
 --echo # End of 10.2 tests
 --echo #
