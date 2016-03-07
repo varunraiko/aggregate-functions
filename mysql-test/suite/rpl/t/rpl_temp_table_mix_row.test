@@ -26,6 +26,7 @@ INSERT INTO t1 VALUES (UUID());
 sync_slave_with_master;
 
 --echo ==== Verify results on slave ====
+SHOW STATUS LIKE "Slave_open_temp_table_definitions";
 SHOW STATUS LIKE "Slave_open_temp_tables";
 
 --echo [on master]
@@ -43,6 +44,7 @@ source include/wait_for_binlog_event.inc;
 sync_slave_with_master;
 
 --echo ==== Verify results on slave ====
+SHOW STATUS LIKE "Slave_open_temp_table_definitions";
 SHOW STATUS LIKE "Slave_open_temp_tables";
 
 --echo ==== Clean up ====
@@ -90,7 +92,7 @@ sync_slave_with_master;
 #        exists).
 #     9. drop t2_tmp and issue deterministic statement: should log drop and
 #        query in statement format (show switch back to STATEMENT format)
-#    10. in the end the slave should not have open temp tables.
+#    10. in the end the slave should not have any temp tables.
 #  
 
 --source include/rpl_reset.inc
@@ -117,8 +119,9 @@ CREATE TEMPORARY TABLE t2_tmp (a int);
 # assertion: assert that ALTER TABLE on t1_tmp will not make into the binlog
 ALTER TABLE t1_tmp ADD COLUMN c INT;
 
--- echo ### assertion: assert that there is one open temp table on slave
+-- echo ### assertion: assert that there is one temp table on slave
 -- sync_slave_with_master
+SHOW STATUS LIKE "Slave_open_temp_table_definitions";
 SHOW STATUS LIKE 'Slave_open_temp_tables';
 
 -- connection master
@@ -127,7 +130,7 @@ SHOW STATUS LIKE 'Slave_open_temp_tables';
 DROP TABLE t1_tmp, t2;
 
 # assertion: assert that statement is logged as row (master still has one
-#            opened temporary table - t2_tmp.
+#            temporary table - t2_tmp.
 INSERT INTO t1 VALUES (1);
 
 # assertion: assert that DROP TABLE *is* logged despite CREATE is not.
@@ -140,6 +143,7 @@ INSERT INTO t1 VALUES (2);
 -- sync_slave_with_master
 
 -- echo ### assertion: assert that slave has no temporary tables opened
+SHOW STATUS LIKE "Slave_open_temp_table_definitions";
 SHOW STATUS LIKE 'Slave_open_temp_tables';
 
 -- connection master

@@ -359,7 +359,8 @@ return 1;
 end|
 prepare stmt from "select f1() as my_column, a from t1";
 execute stmt;
-ERROR HY000: Can't reopen table: 't1'
+my_column	a
+1	1
 call p_verify_reprepare_count(0);
 SUCCESS
 
@@ -368,7 +369,8 @@ a
 1
 prepare stmt from "select a, f1() as my_column from t1";
 execute stmt;
-ERROR HY000: Can't reopen table: 't1'
+a	my_column
+1	1
 call p_verify_reprepare_count(0);
 SUCCESS
 
@@ -377,7 +379,8 @@ a
 1
 prepare stmt from "select f1() as my_column, count(*) from t1";
 execute stmt;
-ERROR HY000: Can't reopen table: 't1'
+my_column	count(*)
+1	1
 call p_verify_reprepare_count(0);
 SUCCESS
 
@@ -386,7 +389,8 @@ a
 1
 prepare stmt from "select count(*), f1() as my_column from t1";
 execute stmt;
-ERROR HY000: Can't reopen table: 't1'
+count(*)	my_column
+1	1
 call p_verify_reprepare_count(0);
 SUCCESS
 
@@ -441,7 +445,7 @@ return 1;
 end|
 prepare stmt from "select count(*), f1() as my_column from t1";
 execute stmt;
-ERROR HY000: Can't reopen table: 't1'
+ERROR 42S01: Table 't1' already exists
 call p_verify_reprepare_count(0);
 SUCCESS
 

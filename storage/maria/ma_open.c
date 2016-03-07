@@ -860,7 +860,7 @@ MARIA_HA *maria_open(const char *name, int mode, uint open_flags)
         (share->options & HA_OPTION_TMP_TABLE))
     {
       share->options|= HA_OPTION_TMP_TABLE;
-      share->temporary= share->delay_key_write= 1;
+      share->delay_key_write= 1;
       share->write_flag=MYF(MY_NABP);
       share->w_locks++;			/* We don't have to update status */
       share->tot_locks++;

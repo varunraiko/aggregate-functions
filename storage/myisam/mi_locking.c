@@ -606,14 +606,12 @@ int _mi_mark_file_changed(MI_INFO *info)
       share->global_changed=1;
       share->state.open_count++;
     }
-    if (!share->temporary)
-    {
-      mi_int2store(buff,share->state.open_count);
-      buff[2]=1;				/* Mark that it's changed */
-      DBUG_RETURN(mysql_file_pwrite(share->kfile, buff, sizeof(buff),
-                                    sizeof(share->state.header),
-                                    MYF(MY_NABP)));
-    }
+
+    mi_int2store(buff,share->state.open_count);
+    buff[2]=1;                                  /* Mark that it's changed */
+    DBUG_RETURN(mysql_file_pwrite(share->kfile, buff, sizeof(buff),
+                                  sizeof(share->state.header),
+                                  MYF(MY_NABP)));
   }
   DBUG_RETURN(0);
 }

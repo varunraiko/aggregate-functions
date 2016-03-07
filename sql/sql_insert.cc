@@ -1,6 +1,6 @@
 /*
    Copyright (c) 2000, 2015, Oracle and/or its affiliates.
-   Copyright (c) 2010, 2015, MariaDB
+   Copyright (c) 2010, 2016, MariaDB Corporation
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -4051,16 +4051,16 @@ static TABLE *create_table_from_items(THD *thd,
     }
     else
     {
-      if (open_temporary_table(thd, create_table))
-      {
-        /*
-          This shouldn't happen as creation of temporary table should make
-          it preparable for open. Anyway we can't drop temporary table if
-          we are unable to find it.
-        */
-        DBUG_ASSERT(0);
-      }
-      DBUG_ASSERT(create_table->table == create_info->table);
+      /*
+        TODO: Explain why we do not need to call THD::wait_for_prior_commit()
+        here?
+      */
+      TABLE *tab= create_info->table;
+      tab->query_id= thd->query_id;
+      thd->thread_specific_used= true;
+      create_table->updatable= true;
+      create_table->table= tab;
+      tab->init(thd, create_table);
     }
   }
   else

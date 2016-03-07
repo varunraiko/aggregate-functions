@@ -523,7 +523,7 @@ int _ma_decrement_open_count(MARIA_HA *info, my_bool lock_tables)
         updated in maria_close().
       */
 
-      if (!share->temporary && !share->now_transactional)
+      if (!share->now_transactional)
       {
         mi_int2store(buff,share->state.open_count);
         write_error= (int) my_pwrite(share->kfile.file, buff, sizeof(buff),

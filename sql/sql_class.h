@@ -1,6 +1,6 @@
 /*
    Copyright (c) 2000, 2015, Oracle and/or its affiliates.
-   Copyright (c) 2009, 2015, MariaDB
+   Copyright (c) 2009, 2016, MariaDB Corporation
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -37,6 +37,7 @@
 #include "thr_lock.h"       /* thr_lock_type, THR_LOCK_DATA, THR_LOCK_INFO */
 #include "thr_timer.h"
 #include "thr_malloc.h"
+#include "temporary_tables.h"
 
 #include "sql_digest_stream.h"            // sql_digest_state
 
@@ -799,6 +800,13 @@ typedef struct system_status_var
   volatile int64 local_memory_used;
   /* Memory allocated for global usage */
   volatile int64 global_memory_used;
+
+  /* Open temporary tables. */
+  ulong open_temporary_tables;
+  /* Number of temporary table definitions opened by THD. */
+  ulong opened_temporary_table_definitions;
+  /* Number of temporary tables opened by THD. */
+  ulong opened_temporary_tables;
 } STATUS_VAR;
 
 /*
@@ -1276,15 +1284,23 @@ public:
     base tables that were opened with @see open_tables().
   */
   TABLE *open_tables;
+
   /**
-    List of temporary tables used by this thread. Contains user-level
-    temporary tables, created with CREATE TEMPORARY TABLE, and
-    internal temporary tables, created, e.g., to resolve a SELECT,
-    or for an intermediate table used in ALTER.
+    Temporary tables manager:
+    It hold the list of temporary tables used by this thread. This includes
+    user-level temporary tables, created with CREATE TEMPORARY TABLE, and
+    internal temporary tables, created, e.g., to resolve a SELECT, or for an
+    intermediate table used in ALTER.
+
     XXX Why are internal temporary tables added to this list?
   */
-  TABLE *temporary_tables;
+  Temporary_tables temporary_tables;
+
+  /*
+    Derived tables.
+  */
   TABLE *derived_tables;
+
   /*
     During a MySQL session, one can lock tables in two modes: automatic
     or manual. In automatic mode all necessary tables are locked just before
@@ -1362,11 +1378,14 @@ public:
 
   void reset_open_tables_state(THD *thd)
   {
-    open_tables= temporary_tables= derived_tables= 0;
-    extra_lock= lock= 0;
+    open_tables= 0;
+    derived_tables= 0;
+    extra_lock= 0;
+    lock= 0;
     locked_tables_mode= LTM_NONE;
     state_flags= 0U;
     m_reprepare_observer= NULL;
+    temporary_tables.reset();
   }
 };
 
@@ -3506,13 +3525,13 @@ public:
     */
     DBUG_PRINT("debug",
                ("temporary_tables: %s, in_sub_stmt: %s, system_thread: %s",
-                YESNO(temporary_tables), YESNO(in_sub_stmt),
+                YESNO(temporary_tables.is_empty()), YESNO(in_sub_stmt),
                 show_system_thread(system_thread)));
     if (in_sub_stmt == 0)
     {
       if (wsrep_binlog_format() == BINLOG_FORMAT_ROW)
         set_current_stmt_binlog_format_row();
-      else if (temporary_tables == NULL)
+      else if (temporary_tables.is_empty())
         set_current_stmt_binlog_format_stmt();
     }
     DBUG_VOID_RETURN;
@@ -3910,10 +3929,6 @@ private:
   LEX_STRING invoker_user;
   LEX_STRING invoker_host;
 
-  /* Protect against add/delete of temporary tables in parallel replication */
-  void rgi_lock_temporary_tables();
-  void rgi_unlock_temporary_tables();
-  bool rgi_have_temporary_tables();
 public:
   /*
     Flag, mutex and condition for a thread to wait for a signal from another
@@ -3930,22 +3945,6 @@ public:
     so far, this is indicated by last_commit_gtid.seq_no == 0.
   */
   rpl_gtid last_commit_gtid;
-
-  inline void lock_temporary_tables()
-  {
-    if (rgi_slave)
-      rgi_lock_temporary_tables();
-  }
-  inline void unlock_temporary_tables()
-  {
-    if (rgi_slave)
-      rgi_unlock_temporary_tables();
-  }    
-  inline bool have_temporary_tables()
-  {
-    return (temporary_tables ||
-            (rgi_slave && rgi_have_temporary_tables()));
-  }
 
   LF_PINS *tdc_hash_pins;
   LF_PINS *xid_hash_pins;

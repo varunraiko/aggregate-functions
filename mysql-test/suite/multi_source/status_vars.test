@@ -107,9 +107,11 @@ create temporary table tmp1 (i int) engine=MyISAM;
 
 --connection slave
 --sync_with_master 0,'master1'
+show status like 'Slave_open_temp_table_definitions';
 show status like 'Slave_open_temp_tables';
 
 set default_master_connection = 'master1';
+show status like 'Slave_open_temp_table_definitions';
 show status like 'Slave_open_temp_tables';
 
 --connect (master2,127.0.0.1,root,,,$SERVER_MYPORT_2)
@@ -119,9 +121,11 @@ create temporary table tmp1 (i int) engine=MyISAM;
 
 --connection slave
 --sync_with_master 0,''
+show status like 'Slave_open_temp_table_definitions';
 show status like 'Slave_open_temp_tables';
 
 set default_master_connection = '';
+show status like 'Slave_open_temp_table_definitions';
 show status like 'Slave_open_temp_tables';
 
 

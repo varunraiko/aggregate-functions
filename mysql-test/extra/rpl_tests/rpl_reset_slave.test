@@ -40,6 +40,7 @@ source include/stop_slave.inc;
 reset slave;
 source include/start_slave.inc;
 sync_with_master;
+show status like 'slave_open_temp_table_definitions';
 show status like 'slave_open_temp_tables';
 connection master;
 drop temporary table if exists t1;

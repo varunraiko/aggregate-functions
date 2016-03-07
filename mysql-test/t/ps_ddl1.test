@@ -284,25 +284,21 @@ end|
 delimiter ;|
 
 prepare stmt from "select f1() as my_column, a from t1";
---error ER_CANT_REOPEN_TABLE
 execute stmt;
 call p_verify_reprepare_count(0);
 select * from t1;
 
 prepare stmt from "select a, f1() as my_column from t1";
---error ER_CANT_REOPEN_TABLE
 execute stmt;
 call p_verify_reprepare_count(0);
 select * from t1;
 
 prepare stmt from "select f1() as my_column, count(*) from t1";
---error ER_CANT_REOPEN_TABLE
 execute stmt;
 call p_verify_reprepare_count(0);
 select * from t1;
 
 prepare stmt from "select count(*), f1() as my_column from t1";
---error ER_CANT_REOPEN_TABLE
 execute stmt;
 call p_verify_reprepare_count(0);
 select * from t1;
@@ -344,7 +340,7 @@ begin
 end|
 delimiter ;|
 prepare stmt from "select count(*), f1() as my_column from t1";
---error ER_CANT_REOPEN_TABLE
+--error ER_TABLE_EXISTS_ERROR
 execute stmt;
 call p_verify_reprepare_count(0);
 select * from t1;

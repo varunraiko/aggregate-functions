@@ -16,6 +16,9 @@ n
 4
 5
 6
+show status like 'Slave_open_temp_table_definitions';
+Variable_name	Value
+Slave_open_temp_table_definitions	0
 show status like 'Slave_open_temp_tables';
 Variable_name	Value
 Slave_open_temp_tables	0

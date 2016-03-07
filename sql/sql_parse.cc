@@ -1,5 +1,5 @@
 /* Copyright (c) 2000, 2015, Oracle and/or its affiliates.
-   Copyright (c) 2008, 2015, MariaDB
+   Copyright (c) 2008, 2016, MariaDB Corporation
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -23,7 +23,7 @@
                               // set_handler_table_locks,
                               // lock_global_read_lock,
                               // make_global_read_lock_block_commit
-#include "sql_base.h"         // find_temporary_table
+#include "sql_base.h"         // Temporary_tables::find_table
 #include "sql_cache.h"        // QUERY_CACHE_FLAGS_SIZE, query_cache_*
 #include "sql_show.h"         // mysqld_list_*, mysqld_show_*,
                               // calc_sum_of_all_status
@@ -192,7 +192,7 @@ static bool some_non_temp_table_to_be_updated(THD *thd, TABLE_LIST *tables)
   for (TABLE_LIST *table= tables; table; table= table->next_global)
   {
     DBUG_ASSERT(table->db && table->table_name);
-    if (table->updating && !find_temporary_table(thd, table))
+    if (table->updating && !thd->temporary_tables.find_table(table))
       return 1;
   }
   return 0;
@@ -1655,7 +1655,7 @@ bool dispatch_command(enum enum_server_command command, THD *thd,
     thd->set_query(fields, query_length);
     general_log_print(thd, command, "%s %s", table_list.table_name, fields);
 
-    if (open_temporary_tables(thd, &table_list))
+    if (thd->temporary_tables.open_tables(&table_list))
       break;
 
     if (check_table_access(thd, SELECT_ACL, &table_list,
@@ -2874,7 +2874,7 @@ mysql_execute_command(THD *thd)
   */
   if (sql_command_flags[lex->sql_command] & CF_PREOPEN_TMP_TABLES)
   {
-    if (open_temporary_tables(thd, all_tables))
+    if (thd->temporary_tables.open_tables(all_tables))
       goto error;
   }
 
@@ -3676,7 +3676,7 @@ end_with_restore_list:
           Temporary tables should be opened for SHOW CREATE TABLE, but not
           for SHOW CREATE VIEW.
         */
-        if (open_temporary_tables(thd, all_tables))
+        if (thd->temporary_tables.open_tables(all_tables))
           goto error;
 
         /*
@@ -3884,7 +3884,8 @@ end_with_restore_list:
     */
     if (first_table->lock_type != TL_WRITE_DELAYED)
     {
-      if ((res= open_temporary_tables(thd, all_tables)))
+      res= (thd->temporary_tables.open_tables(all_tables)) ? TRUE : FALSE;
+      if (res)
         break;
     }
 
@@ -4196,7 +4197,7 @@ end_with_restore_list:
      {
        if (!lex->tmp_table() &&
           (!thd->is_current_stmt_binlog_format_row() ||
-	   !find_temporary_table(thd, table)))
+	   !thd->temporary_tables.find_table(table)))
        {
          WSREP_TO_ISOLATION_BEGIN(NULL, NULL, all_tables);
          break;
@@ -4349,7 +4350,7 @@ end_with_restore_list:
       CF_PREOPEN_TMP_TABLES was set and the tables would be pre-opened
       in a usual way, they would have been closed.
     */
-    if (open_temporary_tables(thd, all_tables))
+    if (thd->temporary_tables.open_tables(all_tables))
       goto error;
 
     if (lock_tables_precheck(thd, all_tables))
@@ -5730,6 +5731,8 @@ finish:
 
   /* Free tables */
   close_thread_tables(thd);
+  /* Do not close HANDLER tables. */
+  thd->temporary_tables.close_tables(false);
 #ifdef WITH_WSREP
   thd->wsrep_consistency_check= NO_CONSISTENCY_CHECK;
 #endif /* WITH_WSREP */
@@ -6369,7 +6372,7 @@ static bool check_show_access(THD *thd, TABLE_LIST *table)
     /*
       Open temporary tables to be able to detect them during privilege check.
     */
-    if (open_temporary_tables(thd, dst_table))
+    if (thd->temporary_tables.open_tables(dst_table))
       return TRUE;
 
     if (check_access(thd, SELECT_ACL, dst_table->db,

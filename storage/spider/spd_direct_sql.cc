@@ -1628,8 +1628,17 @@ long long spider_direct_sql_body(
     table_list.db = direct_sql->db_names[roop_count];
     table_list.table_name = direct_sql->table_names[roop_count];
 #endif
-    if (!(direct_sql->tables[roop_count] =
-      find_temporary_table(thd, &table_list)))
+    TABLE_SHARE *share= thd->temporary_tables.find_table(&table_list);
+
+    if (!share)
+    {
+      direct_sql->tables[roop_count]=
+        thd->temporary_tables.open_table(share, table_list.alias, true);
+    } else {
+      direct_sql->tables[roop_count]= NULL;
+    }
+
+    if (!(direct_sql->tables[roop_count]))
     {
 #if MYSQL_VERSION_ID < 50500
 #else

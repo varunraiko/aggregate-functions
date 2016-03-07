@@ -1,5 +1,5 @@
 /* Copyright (c) 2001, 2015, Oracle and/or its affiliates.
-   Copyright (c) 2011, 2015, MariaDB
+   Copyright (c) 2011, 2016, MariaDB Corporation
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -180,7 +180,7 @@ static void mysql_ha_close_table(SQL_HANDLER *handler)
     table->file->ha_index_or_rnd_end();
     table->query_id= thd->query_id;
     table->open_by_handler= 0;
-    mark_tmp_table_for_reuse(table);
+    //mark_tmp_table_for_reuse(table);
   }
   my_free(handler->lock);
   handler->init();
@@ -294,7 +294,7 @@ bool mysql_ha_open(THD *thd, TABLE_LIST *tables, SQL_HANDLER *reopen)
     open_ltable() or open_table() because we would like to be able
     to open a temporary table.
   */
-  error= (open_temporary_tables(thd, tables) ||
+  error= (thd->temporary_tables.open_tables(tables) ||
           open_tables(thd, &tables, &counter, 0));
 
   if (error)

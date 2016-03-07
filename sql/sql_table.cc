@@ -25,7 +25,7 @@
 #include "sql_table.h"
 #include "sql_parse.h"                        // test_if_data_home_dir
 #include "sql_cache.h"                          // query_cache_*
-#include "sql_base.h"   // open_table_uncached, lock_table_names
+#include "sql_base.h"   // lock_table_names
 #include "lock.h"       // mysql_unlock_tables
 #include "strfunc.h"    // find_type2, find_set
 #include "sql_truncate.h"                       // regenerate_locked_table 
@@ -2028,7 +2028,7 @@ bool mysql_rm_table(THD *thd,TABLE_LIST *tables, my_bool if_exists,
         LEX_STRING db_name= { table->db, table->db_length };
         LEX_STRING table_name= { table->table_name, table->table_name_length };
         if (table->open_type == OT_BASE_ONLY ||
-            !find_temporary_table(thd, table))
+            !thd->temporary_tables.find_table(table))
           (void) delete_statistics_for_table(thd, &db_name, &table_name);
       }
     }
@@ -2281,23 +2281,17 @@ int mysql_rm_table_no_locks(THD *thd, TABLE_LIST *tables, bool if_exists,
     */
     DBUG_ASSERT(!(thd->locked_tables_mode &&
                   table->open_type != OT_BASE_ONLY &&
-                  find_temporary_table(thd, table) &&
+                  thd->temporary_tables.find_table(table) &&
                   table->mdl_request.ticket != NULL));
 
-    /*
-      drop_temporary_table may return one of the following error codes:
-      .  0 - a temporary table was successfully dropped.
-      .  1 - a temporary table was not found.
-      . -1 - a temporary table is used by an outer statement.
-    */
     if (table->open_type == OT_BASE_ONLY || !is_temporary_table(table))
       error= 1;
     else
     {
       table_creation_was_logged= table->table->s->table_creation_was_logged;
-      if ((error= drop_temporary_table(thd, table->table, &is_trans)) == -1)
+      if (thd->temporary_tables.drop_table(table->table, &is_trans, true))
       {
-        DBUG_ASSERT(thd->in_sub_stmt);
+        error= 1;
         goto err;
       }
       table->table= 0;
@@ -4608,12 +4602,13 @@ err:
                              which was created.
   @param[out] key_count      Number of keys in table which was created.
 
-  If one creates a temporary table, this is automatically opened
-
   Note that this function assumes that caller already have taken
   exclusive metadata lock on table being created or used some other
   way to ensure that concurrent operations won't intervene.
   mysql_create_table() is a wrapper that can be used for this.
+
+  In case of temporary tables, the TABLE_SHARE is added to thd's
+  temporary_tables_share list.
 
   @retval 0 OK
   @retval 1 error
@@ -4668,20 +4663,18 @@ int create_table_impl(THD *thd,
   /* Check if table exists */
   if (create_info->tmp_table())
   {
-    TABLE *tmp_table;
-    if (find_and_use_temporary_table(thd, db, table_name, &tmp_table))
-      goto err;
+    TABLE *tmp_table= thd->temporary_tables.find_open_table(db, table_name);
+
     if (tmp_table)
     {
       bool table_creation_was_logged= tmp_table->s->table_creation_was_logged;
       if (options.or_replace())
       {
-        bool tmp;
         /*
           We are using CREATE OR REPLACE on an existing temporary table
           Remove the old table so that we can re-create it.
         */
-        if (drop_temporary_table(thd, tmp_table, &tmp))
+        if (thd->temporary_tables.drop_table(tmp_table, NULL, true))
           goto err;
       }
       else if (options.if_not_exists())
@@ -4820,17 +4813,12 @@ int create_table_impl(THD *thd,
   create_info->table= 0;
   if (!frm_only && create_info->tmp_table())
   {
-    /*
-      Open a table (skipping table cache) and add it into
-      THD::temporary_tables list.
-    */
-
-    TABLE *table= open_table_uncached(thd, create_info->db_type, frm, path,
-                                      db, table_name, true, true);
+    TABLE *table=
+      thd->temporary_tables.create_and_use_table(create_info->db_type, frm,
+                                                 path, db, table_name, true);
 
     if (!table)
     {
-      (void) rm_temporary_table(create_info->db_type, path);
       goto err;
     }
 
@@ -7095,7 +7083,8 @@ static bool mysql_inplace_alter_table(THD *thd,
                             HA_EXTRA_NOT_USED,
                             NULL);
   table_list->table= table= NULL;
-  close_temporary_table(thd, altered_table, true, false);
+
+  thd->temporary_tables.drop_table(altered_table, NULL, false);
 
   /*
     Replace the old .FRM with the new .FRM, but keep the old name for now.
@@ -7185,7 +7174,7 @@ static bool mysql_inplace_alter_table(THD *thd,
       thd->locked_tables_list.unlink_all_closed_tables(thd, NULL, 0);
     /* QQ; do something about metadata locks ? */
   }
-  close_temporary_table(thd, altered_table, true, false);
+  thd->temporary_tables.drop_table(altered_table, NULL, false);
   // Delete temporary .frm/.par
   (void) quick_rm_table(thd, create_info->db_type, alter_ctx->new_db,
                         alter_ctx->tmp_name, FN_IS_TMP | NO_HA_TABLE);
@@ -8337,7 +8326,9 @@ bool mysql_alter_table(THD *thd,char *new_db, char *new_name,
   {
     if (table->s->tmp_table != NO_TMP_TABLE)
     {
-      if (find_temporary_table(thd, alter_ctx.new_db, alter_ctx.new_name))
+      /* Check whether a temporary table exists with same requested new name. */
+      if (thd->temporary_tables.find_table(alter_ctx.new_db,
+                                           alter_ctx.new_name))
       {
         my_error(ER_TABLE_EXISTS_ERROR, MYF(0), alter_ctx.new_alias);
         DBUG_RETURN(true);
@@ -8773,11 +8764,12 @@ bool mysql_alter_table(THD *thd,char *new_db, char *new_name,
     // We assume that the table is non-temporary.
     DBUG_ASSERT(!table->s->tmp_table);
 
-    if (!(altered_table= open_table_uncached(thd, new_db_type, &frm,
-                                             alter_ctx.get_tmp_path(),
-                                             alter_ctx.new_db,
-                                             alter_ctx.tmp_name,
-                                             true, false)))
+    if (!(altered_table=
+          thd->temporary_tables.create_and_use_table(new_db_type, &frm,
+                                                     alter_ctx.get_tmp_path(),
+                                                     alter_ctx.new_db,
+                                                     alter_ctx.tmp_name,
+                                                     false)))
       goto err_new_table_cleanup;
 
     /* Set markers for fields in TABLE object for altered table. */
@@ -8817,7 +8809,7 @@ bool mysql_alter_table(THD *thd,char *new_db, char *new_name,
       {
         ha_alter_info.report_unsupported_error("LOCK=NONE/SHARED",
                                                "LOCK=EXCLUSIVE");
-        close_temporary_table(thd, altered_table, true, false);
+        thd->temporary_tables.drop_table(altered_table, NULL, false);
         goto err_new_table_cleanup;
       }
       break;
@@ -8828,7 +8820,7 @@ bool mysql_alter_table(THD *thd,char *new_db, char *new_name,
           Alter_info::ALTER_TABLE_LOCK_NONE)
       {
         ha_alter_info.report_unsupported_error("LOCK=NONE", "LOCK=SHARED");
-        close_temporary_table(thd, altered_table, true, false);
+        thd->temporary_tables.drop_table(altered_table, NULL, false);
         goto err_new_table_cleanup;
       }
       break;
@@ -8842,7 +8834,7 @@ bool mysql_alter_table(THD *thd,char *new_db, char *new_name,
       {
         ha_alter_info.report_unsupported_error("ALGORITHM=INPLACE",
                                                "ALGORITHM=COPY");
-        close_temporary_table(thd, altered_table, true, false);
+        thd->temporary_tables.drop_table(altered_table, NULL, false);
         goto err_new_table_cleanup;
       }
       // COPY with LOCK=NONE is not supported, no point in trying.
@@ -8850,7 +8842,7 @@ bool mysql_alter_table(THD *thd,char *new_db, char *new_name,
           Alter_info::ALTER_TABLE_LOCK_NONE)
       {
         ha_alter_info.report_unsupported_error("LOCK=NONE", "LOCK=SHARED");
-        close_temporary_table(thd, altered_table, true, false);
+        thd->temporary_tables.drop_table(altered_table, NULL, false);
         goto err_new_table_cleanup;
       }
       // Otherwise use COPY
@@ -8858,7 +8850,7 @@ bool mysql_alter_table(THD *thd,char *new_db, char *new_name,
       break;
     case HA_ALTER_ERROR:
     default:
-      close_temporary_table(thd, altered_table, true, false);
+      thd->temporary_tables.drop_table(altered_table, NULL, false);
       goto err_new_table_cleanup;
     }
 
@@ -8877,7 +8869,7 @@ bool mysql_alter_table(THD *thd,char *new_db, char *new_name,
     }
     else
     {
-      close_temporary_table(thd, altered_table, true, false);
+      thd->temporary_tables.drop_table(altered_table, NULL, false);
     }
   }
 
@@ -8930,10 +8922,11 @@ bool mysql_alter_table(THD *thd,char *new_db, char *new_name,
 
   if (create_info->tmp_table())
   {
-    if (!open_table_uncached(thd, new_db_type, &frm,
-                             alter_ctx.get_tmp_path(),
-                             alter_ctx.new_db, alter_ctx.tmp_name,
-                             true, true))
+    if (!thd->temporary_tables.create_and_use_table(new_db_type, &frm,
+                                                    alter_ctx.get_tmp_path(),
+                                                    alter_ctx.new_db,
+                                                    alter_ctx.tmp_name,
+                                                    true))
       goto err_new_table_cleanup;
   }
 
@@ -8945,17 +8938,21 @@ bool mysql_alter_table(THD *thd,char *new_db, char *new_name,
                        alter_ctx.tmp_name, strlen(alter_ctx.tmp_name),
                        alter_ctx.tmp_name, TL_READ_NO_INSERT);
     /* Table is in thd->temporary_tables */
-    (void) open_temporary_table(thd, &tbl);
+    (void) thd->temporary_tables.open_table(&tbl);
     new_table= tbl.table;
   }
   else
   {
-    /* table is a normal table: Create temporary table in same directory */
-    /* Open our intermediate table. */
-    new_table= open_table_uncached(thd, new_db_type, &frm,
-                                   alter_ctx.get_tmp_path(),
-                                   alter_ctx.new_db, alter_ctx.tmp_name,
-                                   true, true);
+    /*
+      table is a normal table: Create temporary table in same directory.
+      Open our intermediate table.
+    */
+    new_table=
+      thd->temporary_tables.create_and_use_table(new_db_type, &frm,
+                                                 alter_ctx.get_tmp_path(),
+                                                 alter_ctx.new_db,
+                                                 alter_ctx.tmp_name,
+                                                 true);
   }
   if (!new_table)
     goto err_new_table_cleanup;
@@ -9023,10 +9020,10 @@ bool mysql_alter_table(THD *thd,char *new_db, char *new_name,
     new_table->s->table_creation_was_logged=
       table->s->table_creation_was_logged;
     /* Remove link to old table and rename the new one */
-    close_temporary_table(thd, table, true, true);
+    thd->temporary_tables.drop_table(table, NULL, true);
     /* Should pass the 'new_name' as we store table name in the cache */
-    if (rename_temporary_table(thd, new_table,
-                               alter_ctx.new_db, alter_ctx.new_name))
+    if (thd->temporary_tables.rename_table(new_table, alter_ctx.new_db,
+                                           alter_ctx.new_name))
       goto err_new_table_cleanup;
     /* We don't replicate alter table statement on temporary tables */
     if (!thd->is_current_stmt_binlog_format_row() &&
@@ -9041,7 +9038,7 @@ bool mysql_alter_table(THD *thd,char *new_db, char *new_name,
     not delete it! Even altough MERGE tables do not have their children
     attached here it is safe to call close_temporary_table().
   */
-  close_temporary_table(thd, new_table, true, false);
+  thd->temporary_tables.drop_table(new_table, NULL, false);
   new_table= NULL;
 
   DEBUG_SYNC(thd, "alter_table_before_rename_result_table");
@@ -9183,8 +9180,7 @@ err_new_table_cleanup:
   my_free(const_cast<uchar*>(frm.str));
   if (new_table)
   {
-    /* close_temporary_table() frees the new_table pointer. */
-    close_temporary_table(thd, new_table, true, true);
+    thd->temporary_tables.drop_table(new_table, NULL, true);
   }
   else
     (void) quick_rm_table(thd, new_db_type,
@@ -9670,7 +9666,7 @@ bool mysql_checksum_table(THD *thd, TABLE_LIST *tables,
     /* Allow to open real tables only. */
     table->required_type= FRMTYPE_TABLE;
 
-    if (open_temporary_tables(thd, table) ||
+    if (thd->temporary_tables.open_tables(table) ||
         open_and_lock_tables(thd, table, FALSE, 0))
     {
       t= NULL;

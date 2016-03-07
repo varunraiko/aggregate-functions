@@ -45,7 +45,7 @@ int maria_close(register MARIA_HA *info)
       a global mutex
     */
     if (flush_pagecache_blocks(share->pagecache, &share->kfile,
-                               ((share->temporary || share->deleting) ?
+                               ((share->deleting) ?
                                 FLUSH_IGNORE_CHANGED :
                                 FLUSH_RELEASE)))
       error= my_errno;
@@ -111,7 +111,7 @@ int maria_close(register MARIA_HA *info)
         since the start of the function (very unlikely)
       */
       if (flush_pagecache_blocks(share->pagecache, &share->kfile,
-                                 ((share->temporary || share->deleting) ?
+                                 ((share->deleting) ?
                                   FLUSH_IGNORE_CHANGED :
                                   FLUSH_RELEASE)))
         error= my_errno;
@@ -155,7 +155,7 @@ int maria_close(register MARIA_HA *info)
       _ma_decrement_open_count(info, 0);
 
       /* Ensure that open_count really is zero */
-      DBUG_ASSERT(maria_is_crashed(info) || share->temporary ||
+      DBUG_ASSERT(maria_is_crashed(info) ||
                   share->state.open_count == 0 ||
                   share->open_count_not_zero_on_open);
 

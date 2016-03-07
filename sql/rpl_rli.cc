@@ -1,5 +1,6 @@
 /* Copyright (c) 2006, 2013, Oracle and/or its affiliates.
    Copyright (c) 2010, 2013, Monty Program Ab
+   Copyright (c) 2016, MariaDB Corporation
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -52,8 +53,8 @@ Relay_log_info::Relay_log_info(bool is_slave_recovery)
    no_storage(FALSE), replicate_same_server_id(::replicate_same_server_id),
    info_fd(-1), cur_log_fd(-1), relay_log(&sync_relaylog_period),
    sync_counter(0), is_relay_log_recovery(is_slave_recovery),
-   save_temporary_tables(0), mi(0),
-   inuse_relaylog_list(0), last_inuse_relaylog(0),
+   save_temp_table_shares(0),
+   mi(0), inuse_relaylog_list(0), last_inuse_relaylog(0),
    cur_log_old_open_count(0), group_relay_log_pos(0), 
    event_relay_log_pos(0),
 #if HAVE_valgrind
@@ -1060,24 +1061,14 @@ void Relay_log_info::inc_group_relay_log_pos(ulonglong log_pos,
 
 void Relay_log_info::close_temporary_tables()
 {
-  TABLE *table,*next;
   DBUG_ENTER("Relay_log_info::close_temporary_tables");
 
-  for (table=save_temporary_tables ; table ; table=next)
+  if (sql_driver_thd)
   {
-    next=table->next;
-
-    /* Reset in_use as the table may have been created by another thd */
-    table->in_use=0;
-    /*
-      Don't ask for disk deletion. For now, anyway they will be deleted when
-      slave restarts, but it is a better intention to not delete them.
-    */
-    DBUG_PRINT("info", ("table: 0x%lx", (long) table));
-    close_temporary(table, 1, 0);
+    sql_driver_thd->temporary_tables.close_tables(true);
   }
-  save_temporary_tables= 0;
-  slave_open_temp_tables= 0;
+  save_temp_table_shares= 0;
+
   DBUG_VOID_RETURN;
 }
 
@@ -1753,6 +1744,10 @@ void rpl_group_info::cleanup_context(THD *thd, bool error)
   }
   m_table_map.clear_tables();
   slave_close_thread_tables(thd);
+
+  /* Cleanup temporary tables. */
+  thd->temporary_tables.cleanup();
+
   if (error)
   {
     thd->mdl_context.release_transactional_locks();

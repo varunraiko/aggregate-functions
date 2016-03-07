@@ -7,13 +7,19 @@ CREATE TEMPORARY TABLE t1_tmp1(a INT);
 INSERT INTO t1 VALUES (UUID());
 [on slave]
 ==== Verify results on slave ====
+SHOW STATUS LIKE "Slave_open_temp_table_definitions";
+Variable_name	Value
+Slave_open_temp_table_definitions	1
 SHOW STATUS LIKE "Slave_open_temp_tables";
 Variable_name	Value
-Slave_open_temp_tables	1
+Slave_open_temp_tables	0
 [on master]
 [on master1]
 [on slave]
 ==== Verify results on slave ====
+SHOW STATUS LIKE "Slave_open_temp_table_definitions";
+Variable_name	Value
+Slave_open_temp_table_definitions	0
 SHOW STATUS LIKE "Slave_open_temp_tables";
 Variable_name	Value
 Slave_open_temp_tables	0
@@ -32,15 +38,21 @@ ALTER TABLE t1_tmp ADD COLUMN b INT;
 DELETE FROM t2;
 CREATE TEMPORARY TABLE t2_tmp (a int);
 ALTER TABLE t1_tmp ADD COLUMN c INT;
-### assertion: assert that there is one open temp table on slave
+### assertion: assert that there is one temp table on slave
+SHOW STATUS LIKE "Slave_open_temp_table_definitions";
+Variable_name	Value
+Slave_open_temp_table_definitions	1
 SHOW STATUS LIKE 'Slave_open_temp_tables';
 Variable_name	Value
-Slave_open_temp_tables	1
+Slave_open_temp_tables	0
 DROP TABLE t1_tmp, t2;
 INSERT INTO t1 VALUES (1);
 DROP TEMPORARY TABLE t2_tmp;
 INSERT INTO t1 VALUES (2);
 ### assertion: assert that slave has no temporary tables opened
+SHOW STATUS LIKE "Slave_open_temp_table_definitions";
+Variable_name	Value
+Slave_open_temp_table_definitions	0
 SHOW STATUS LIKE 'Slave_open_temp_tables';
 Variable_name	Value
 Slave_open_temp_tables	0

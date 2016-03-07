@@ -489,7 +489,7 @@ handler t1 open as a1;
 handler a1 read a=(1);
 handler a1 read a next;
 handler a1 read a next;
---error ER_CANT_REOPEN_TABLE
+#--error ER_CANT_REOPEN_TABLE
 select a,b from t1;
 handler a1 read a prev;
 handler a1 read a prev;
@@ -581,7 +581,7 @@ handler t1 open;
 handler t1 read next;
 --error ER_LOCK_OR_ACTIVE_TRANSACTION
 handler t2 close;
---error ER_CANT_REOPEN_TABLE
+#--error ER_CANT_REOPEN_TABLE
 handler t3 open;
 --echo # After UNLOCK TABLES handlers should be around and
 --echo # we should be able to continue reading through them.
@@ -1264,7 +1264,7 @@ handler t1 read a next;
 select * from t1;
 --echo # Sic: the position is not lost
 handler t2 read a next;
---error ER_CANT_REOPEN_TABLE
+#--error ER_CANT_REOPEN_TABLE
 select * from t2;
 handler t2 read a next;
 drop table t1;

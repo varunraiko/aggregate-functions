@@ -2231,8 +2231,9 @@ begin
  return 1;
 end|
 delimiter ;|
---error ER_CANT_REOPEN_TABLE
 create temporary table t1 as select f1();
+
+drop temporary table t1;
 
 delimiter |;
 create function f2() returns int
@@ -2241,9 +2242,9 @@ begin
  return 1;
 end|
 delimiter ;|
---error ER_CANT_REOPEN_TABLE
 create temporary table t1 as select f2();
 
+drop temporary table t1, t2;
 drop function f1;
 drop function f2;
 
@@ -2259,9 +2260,9 @@ begin
  return 1;
 end|
 delimiter ;|
---error ER_CANT_REOPEN_TABLE
 create temporary table t1 as select f2();
 
+drop temporary table t1, t2;
 drop function f1;
 drop function f2;
 
