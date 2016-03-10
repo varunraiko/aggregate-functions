@@ -6159,7 +6159,8 @@ bool TABLE::mark_virtual_columns_for_write(bool insert_fl)
     tmp_vfield= *vfield_ptr;
     if (bitmap_is_set(write_set, tmp_vfield->field_index))
       bitmap_updated= mark_virtual_col(tmp_vfield);
-    else if (tmp_vfield->vcol_info->stored_in_db)
+    else if (tmp_vfield->vcol_info->stored_in_db ||
+             (tmp_vfield->flags & PART_KEY_FLAG))
     {
       bool mark_fl= insert_fl;
       if (!mark_fl)
@@ -6898,7 +6899,8 @@ int update_virtual_fields(THD *thd, TABLE *table,
         break;
       }
     case VCOL_UPDATE_FOR_READ:
-      update= !vcol_info->stored_in_db
+      update= !vcol_info->stored_in_db && !(table->key_read &&
+               vfield->part_of_key.is_set(table->file->active_index))
            && bitmap_is_set(table->vcol_set, vfield->field_index);
       break;
     case VCOL_UPDATE_FOR_WRITE:

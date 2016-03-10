@@ -11866,6 +11866,12 @@ ha_innobase::create(
 		DBUG_RETURN(HA_ERR_TABLE_READONLY);
 	}
 
+        if (error_for_indexed_vcols(form))
+        {
+          my_error(ER_KEY_BASED_ON_GENERATED_VIRTUAL_COLUMN, MYF(0));
+          DBUG_RETURN(HA_WRONG_CREATE_OPTION);
+        }
+
 	/* Create the table definition in InnoDB */
 
 	/* Validate table options not handled by the SQL-parser */

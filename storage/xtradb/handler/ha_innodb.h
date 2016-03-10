@@ -696,3 +696,15 @@ innobase_copy_frm_flags_from_table_share(
 /*=====================================*/
 	dict_table_t*		innodb_table,	/*!< in/out: InnoDB table */
 	const TABLE_SHARE*	table_share);	/*!< in: table share */
+
+static inline bool error_for_indexed_vcols(TABLE *table)
+{
+  for (uint i=0; i < table->s->vfields; i++)
+    if (!table->vfield[i]->stored_in_db() &&
+        !table->vfield[i]->part_of_key.is_clear_all())
+    {
+      my_error(ER_KEY_BASED_ON_GENERATED_VIRTUAL_COLUMN, MYF(0));
+      return true;
+    }
+  return false;
+}

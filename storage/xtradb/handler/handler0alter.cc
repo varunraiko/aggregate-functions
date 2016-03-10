@@ -299,6 +299,9 @@ ha_innobase::check_if_supported_inplace_alter(
 		DBUG_RETURN(HA_ALTER_INPLACE_NOT_SUPPORTED);
 	}
 
+        if (error_for_indexed_vcols(altered_table))
+          DBUG_RETURN(HA_ALTER_INPLACE_NOT_SUPPORTED);
+
 	update_thd();
 	trx_search_latch_release_if_reserved(prebuilt->trx);
 
