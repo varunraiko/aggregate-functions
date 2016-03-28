@@ -2975,6 +2975,13 @@ sp_lex_keeper::reset_lex_and_exec_core(THD *thd, uint *nextp,
 
   reinit_stmt_before_use(thd, m_lex);
 
+#ifndef EMBEDDED_LIBRARY
+  if ((thd->client_capabilities & CLIENT_SESSION_TRACK) &&
+      thd->session_tracker.enabled_any() &&
+      thd->session_tracker.changed_any())
+    thd->lex->safe_to_cache_query= 0;
+#endif
+
   if (open_tables)
     res= instr->exec_open_and_lock_tables(thd, m_lex->query_tables);
 

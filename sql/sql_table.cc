@@ -56,6 +56,7 @@
 #include "transaction.h"
 #include "sql_audit.h"
 
+
 #ifdef __WIN__
 #include <io.h>
 #endif
@@ -8983,6 +8984,9 @@ bool mysql_alter_table(THD *thd,char *new_db, char *new_name,
                              alter_ctx.new_db, alter_ctx.tmp_name,
                              true, true))
       goto err_new_table_cleanup;
+    /* in case of alter temp table send the tracker in OK packet */
+    if (thd->session_tracker.get_tracker(SESSION_STATE_CHANGE_TRACKER)->is_enabled())
+      thd->session_tracker.get_tracker(SESSION_STATE_CHANGE_TRACKER)->mark_as_changed(thd, NULL);
   }
 
   /* Open the table since we need to copy the data. */

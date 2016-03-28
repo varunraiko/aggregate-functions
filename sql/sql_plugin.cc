@@ -322,6 +322,8 @@ static void unlock_variables(THD *thd, struct system_variables *vars);
 static void cleanup_variables(struct system_variables *vars);
 static void plugin_vars_free_values(sys_var *vars);
 static void restore_ptr_backup(uint n, st_ptr_backup *backup);
+#define my_intern_plugin_lock(A,B) intern_plugin_lock(A,B)
+#define my_intern_plugin_lock_ci(A,B) intern_plugin_lock(A,B)
 static plugin_ref intern_plugin_lock(LEX *lex, plugin_ref plugin);
 static void intern_plugin_unlock(LEX *lex, plugin_ref plugin);
 static void reap_plugins(void);
@@ -2776,22 +2778,23 @@ static void update_func_double(THD *thd, struct st_mysql_sys_var *var,
   System Variables support
 ****************************************************************************/
 
-
-sys_var *find_sys_var(THD *thd, const char *str, uint length)
+sys_var *find_sys_var_ex(THD *thd, const char *str, size_t length,
+                         bool throw_error, bool locked)
 {
   sys_var *var;
   sys_var_pluginvar *pi= NULL;
   plugin_ref plugin;
-  DBUG_ENTER("find_sys_var");
+  DBUG_ENTER("find_sys_var_ex");
 
-  mysql_mutex_lock(&LOCK_plugin);
+  if (!locked)
+    mysql_mutex_lock(&LOCK_plugin);
   mysql_rwlock_rdlock(&LOCK_system_variables_hash);
   if ((var= intern_find_sys_var(str, length)) &&
       (pi= var->cast_pluginvar()))
   {
     mysql_rwlock_unlock(&LOCK_system_variables_hash);
     LEX *lex= thd ? thd->lex : 0;
-    if (!(plugin= intern_plugin_lock(lex, plugin_int_to_ref(pi->plugin))))
+    if (!(plugin= my_intern_plugin_lock(lex, plugin_int_to_ref(pi->plugin))))
       var= NULL; /* failed to lock it, it must be uninstalling */
     else
     if (!(plugin_state(plugin) & PLUGIN_IS_READY))
@@ -2803,13 +2806,19 @@ sys_var *find_sys_var(THD *thd, const char *str, uint length)
   }
   else
     mysql_rwlock_unlock(&LOCK_system_variables_hash);
-  mysql_mutex_unlock(&LOCK_plugin);
+  if (!locked)
+    mysql_mutex_unlock(&LOCK_plugin);
 
-  if (!var)
+  if (!throw_error && !var)
     my_error(ER_UNKNOWN_SYSTEM_VARIABLE, MYF(0), (char*) str);
   DBUG_RETURN(var);
 }
 
+
+sys_var *find_sys_var(THD *thd, const char *str, size_t length)
+{
+  return find_sys_var_ex(thd, str, length, false, false);
+}
 
 /*
   called by register_var, construct_options and test_plugin_options.

@@ -1461,6 +1461,11 @@ void THD::init(void)
   /* Initialize the Debug Sync Facility. See debug_sync.cc. */
   debug_sync_init_thread(this);
 #endif /* defined(ENABLED_DEBUG_SYNC) */
+
+  /* Initialize session_tracker and create all tracker objects */
+  session_tracker.init(this->charset());
+  session_tracker.enable(this);
+
   apc_target.init(&LOCK_thd_data);
   DBUG_VOID_RETURN;
 }
@@ -1619,6 +1624,12 @@ void THD::cleanup(void)
   mysql_ull_cleanup(this);
   /* All metadata locks must have been released by now. */
   DBUG_ASSERT(!mdl_context.has_locks());
+
+  /*
+    Destroy trackers only after finishing manipulations with transaction
+    state to avoid issues with Transaction_state_tracker.
+  */
+  session_tracker.deinit();
 
   apc_target.destroy();
   cleanup_done=1;

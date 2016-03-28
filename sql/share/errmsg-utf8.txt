@@ -7154,3 +7154,8 @@ ER_WRONG_ORDER_IN_WITH_CLAUSE
         eng "The definition of the table '%s' refers to the table '%s' defined later in a non-recursive WITH clause"
 ER_RECURSIVE_QUERY_IN_WITH_CLAUSE
         eng "Recursive queries in WITH clause are not supported yet"
+ER_DUP_LIST_ENTRY
+	eng "Duplicate entry '%-.192s'."
+ER_NET_OK_PACKET_TOO_LARGE 08S01
+        eng "OK packet too large"
+        ukr "Пакет OK надто великий"

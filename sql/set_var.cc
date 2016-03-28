@@ -199,8 +199,24 @@ bool sys_var::update(THD *thd, set_var *var)
       (on_update && on_update(this, thd, OPT_GLOBAL));
   }
   else
-    return session_update(thd, var) ||
+  {
+    bool ret= session_update(thd, var) ||
       (on_update && on_update(this, thd, OPT_SESSION));
+
+    /*
+      Make sure we don't session-track variables that are not actually
+      part of the session. tx_isolation and and tx_read_only for example
+      exist as GLOBAL, SESSION, and one-shot ("for next transaction only").
+    */
+    if (var->type == OPT_SESSION)
+    {
+      if ((!ret) &&
+          thd->session_tracker.get_tracker(SESSION_STATE_CHANGE_TRACKER)->is_enabled())
+        thd->session_tracker.get_tracker(SESSION_STATE_CHANGE_TRACKER)->mark_as_changed(thd, &var->var->name);
+    }
+
+    return ret;
+  }
 }
 
 uchar *sys_var::session_value_ptr(THD *thd, const LEX_STRING *base)
@@ -862,6 +878,8 @@ int set_var_user::update(THD *thd)
                MYF(0));
     return -1;
   }
+  if (thd->session_tracker.get_tracker(SESSION_STATE_CHANGE_TRACKER)->is_enabled())
+    thd->session_tracker.get_tracker(SESSION_STATE_CHANGE_TRACKER)->mark_as_changed(thd, NULL);
   return 0;
 }
 
@@ -965,6 +983,8 @@ int set_var_collation_client::update(THD *thd)
   thd->variables.character_set_results= character_set_results;
   thd->variables.collation_connection= collation_connection;
   thd->update_charset();
+  if (thd->session_tracker.get_tracker(SESSION_STATE_CHANGE_TRACKER)->is_enabled())
+    thd->session_tracker.get_tracker(SESSION_STATE_CHANGE_TRACKER)->mark_as_changed(thd, NULL);
   thd->protocol_text.init(thd);
   thd->protocol_binary.init(thd);
   return 0;
