@@ -318,8 +318,8 @@ enum release_type { RELEASE_NORMAL, RELEASE_WAIT_FOR_DROP };
 enum enum_vcol_update_mode
 {
   VCOL_UPDATE_FOR_READ= 0,
-  VCOL_UPDATE_FOR_WRITE,
-  VCOL_UPDATE_ALL
+  VCOL_UPDATE_FOR_READ_WRITE,
+  VCOL_UPDATE_FOR_WRITE
 };
 
 class Field_blob;
@@ -1288,7 +1288,7 @@ public:
   void mark_columns_needed_for_insert(void);
   void mark_columns_per_binlog_row_image(void);
   bool mark_virtual_col(Field *field);
-  void mark_virtual_columns_for_write(bool insert_fl);
+  bool mark_virtual_columns_for_write(bool insert_fl);
   void mark_default_fields_for_write();
   bool has_default_function(bool is_update);
   inline void column_bitmaps_set(MY_BITMAP *read_set_arg,
