@@ -2417,19 +2417,13 @@ end:
   @brief
     Unpack the definition of a virtual column from its linear representation
 
-  @param
-    thd                  The thread object
-  @param
-    mem_root             The mem_root object where to allocated memory 
-  @param
-    table                The table containing the virtual column
-  @param
-    field                The field for the virtual
-  @param  
-    vcol_expr            The string representation of the defining expression
-  @param[out]
-    error_reported       The flag to inform the caller that no other error
-                         messages are to be generated
+  @param thd                  The thread object
+  @param mem_root             The mem_root object where to allocated memory
+  @param table                The table containing the virtual column
+  @param field                The field for the virtual
+  @param vcol_expr            The string representation of the defining expression
+  @param[out] error_reported  The flag to inform the caller that no other error
+                              messages are to be generated
 
   @details
     The function takes string representation 'vcol_expr' of the defining
@@ -2441,13 +2435,11 @@ end:
     it is created in table->memroot within the special arena TABLE::expr_arena.
 
   @note
-    Before passing 'vcol_expr" to the parser the function embraces it in 
-    parenthesis and prepands it a special keyword.
-  
-   @retval
-    FALSE           If a success
-   @retval
-    TRUE            Otherwise
+    Before passing 'vcol_expr' to the parser the function wraps it in
+    parentheses and prepends a special keyword.
+
+   @retval FALSE           If a success
+   @retval TRUE            Otherwise
 */
 bool unpack_vcol_info_from_frm(THD *thd,
                                MEM_ROOT *mem_root,
