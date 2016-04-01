@@ -1,0 +1,18 @@
+create table t1 (
+#linenum int(6) not null default 0 special=rowid,
+name char(12) not null,
+city char(12) not null,
+birth date not null date_format='DD/MM/YYYY',
+hired date not null date_format='DD/MM/YYYY' flag=36,
+agehired int(3) as (floor(datediff(hired,birth)/365.25))
+)
+engine=CONNECT table_type=FIX file_name='boys.txt' mapped=YES lrecl=47;
+select * from t1;
+name	city	birth	hired	agehired
+John	Boston     2	1986-01-05	2010-06-02	24
+Henry	Boston     0	1987-06-07	2008-04-01	20
+George	San Jose   1	1981-08-01	2010-06-02	28
+Sam	Chicago    2	1979-11-02	2007-10-10	27
+James	Dallas     1	1992-05-03	2009-12-14	17
+Bill	Boston     1	1986-09-01	2008-02-10	21
+drop table t1;
