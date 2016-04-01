@@ -377,8 +377,9 @@ MI_INFO *mi_open(const char *name, int mode, uint open_flags)
 	{
 #ifdef HAVE_SPATIAL
 	  uint sp_segs=SPDIMS*2;
-	  share->keyinfo[i].seg=pos-sp_segs;
-	  share->keyinfo[i].keysegs--;
+          keyinfo->seg= pos - sp_segs;
+          DBUG_ASSERT(keyinfo->keysegs == sp_segs + 1);
+          keyinfo->keysegs= sp_segs;
 #else
 	  my_errno=HA_ERR_UNSUPPORTED;
 	  goto err;
