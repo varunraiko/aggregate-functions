@@ -5367,6 +5367,19 @@ static Sys_var_ulong Sys_log_tc_size(
        BLOCK_SIZE(my_getpagesize()));
 #endif
 
+const LEX_CSTRING SESSION_TRACK_SYSTEM_VARIABLES_NAME=
+  {STRING_WITH_LEN("session_track_system_variables")};
+
+static Sys_var_sesvartrack Sys_track_session_sys_vars(
+       SESSION_TRACK_SYSTEM_VARIABLES_NAME.str,
+       "Track changes in registered system variables.",
+       sys_var::SESSION,
+       CMD_LINE(REQUIRED_ARG),
+       DEFAULT("autocommit,character_set_client,character_set_connection,"
+               "character_set_results,time_zone"),
+       NO_MUTEX_GUARD,
+       NOT_IN_BINLOG,
+       ON_CHECK(0), ON_UPDATE(0));
 
 static bool update_session_track_schema(sys_var *self, THD *thd,
                                         enum_var_type type)

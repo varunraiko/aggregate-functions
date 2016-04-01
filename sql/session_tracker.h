@@ -98,6 +98,11 @@ public:
   virtual void mark_as_changed(THD *thd, LEX_CSTRING *name)= 0;
 };
 
+bool sysvartrack_validate_value(THD *thd, const char *str, size_t len);
+bool sysvartrack_update(THD *thd);
+size_t sysvartrack_value_len(THD *thd);
+bool sysvartrack_value_construct(THD *thd, char *val, size_t len);
+
 
 /**
   Session_tracker
@@ -141,9 +146,9 @@ public:
     tracker_xxx variables' value that the session inherit from global
     variables at the time of session initialization (see plugin_thdvar_init).
   */
-  void init(const CHARSET_INFO *char_set);
+  void init();
   void enable(THD *thd);
-  bool server_boot_verify(const CHARSET_INFO *char_set, LEX_STRING var_list);
+  bool server_boot_verify(const CHARSET_INFO *char_set);
 
   /** Returns the pointer to the tracker object for the specified tracker. */
   State_tracker *get_tracker(enum_session_tracker tracker) const;

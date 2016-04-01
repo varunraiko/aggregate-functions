@@ -682,7 +682,6 @@ typedef struct system_variables
 
   my_bool pseudo_slave_mode;
 
-  char *track_sysvars_ptr;
   my_bool session_track_schema;
   my_bool session_track_state_change;
   ulong   session_track_transaction_info;

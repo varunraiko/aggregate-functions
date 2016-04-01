@@ -1463,7 +1463,7 @@ void THD::init(void)
 #endif /* defined(ENABLED_DEBUG_SYNC) */
 
   /* Initialize session_tracker and create all tracker objects */
-  session_tracker.init(this->charset());
+  session_tracker.init();
   session_tracker.enable(this);
 
   apc_target.init(&LOCK_thd_data);

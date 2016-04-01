@@ -211,6 +211,12 @@ bool sys_var::update(THD *thd, set_var *var)
     if (var->type == OPT_SESSION)
     {
       if ((!ret) &&
+          thd->session_tracker.get_tracker(SESSION_SYSVARS_TRACKER)->
+          is_enabled())
+        thd->session_tracker.get_tracker(SESSION_SYSVARS_TRACKER)->
+          mark_as_changed(thd, (LEX_CSTRING*)var->var);
+
+      if ((!ret) &&
           thd->session_tracker.get_tracker(SESSION_STATE_CHANGE_TRACKER)->is_enabled())
         thd->session_tracker.get_tracker(SESSION_STATE_CHANGE_TRACKER)->mark_as_changed(thd, &var->var->name);
     }
@@ -983,6 +989,29 @@ int set_var_collation_client::update(THD *thd)
   thd->variables.character_set_results= character_set_results;
   thd->variables.collation_connection= collation_connection;
   thd->update_charset();
+
+  /* Mark client collation variables as changed */
+  if (thd->session_tracker.get_tracker(SESSION_SYSVARS_TRACKER)->is_enabled())
+  {
+    sys_var *svar;
+    mysql_mutex_lock(&LOCK_plugin);
+    if ((svar= find_sys_var_ex(thd, "character_set_client",
+                               sizeof("character_set_client") - 1,
+                               false, true)))
+      thd->session_tracker.get_tracker(SESSION_SYSVARS_TRACKER)->
+        mark_as_changed(thd, (LEX_CSTRING*)svar);
+    if ((svar= find_sys_var_ex(thd, "character_set_results",
+                             sizeof("character_set_results") - 1,
+                               false, true)))
+      thd->session_tracker.get_tracker(SESSION_SYSVARS_TRACKER)->
+        mark_as_changed(thd, (LEX_CSTRING*)svar);
+    if ((svar= find_sys_var_ex(thd, "character_set_connection",
+                                sizeof("character_set_connection") - 1,
+                               false, true)))
+      thd->session_tracker.get_tracker(SESSION_SYSVARS_TRACKER)->
+        mark_as_changed(thd, (LEX_CSTRING*)svar);
+    mysql_mutex_unlock(&LOCK_plugin);
+  }
   if (thd->session_tracker.get_tracker(SESSION_STATE_CHANGE_TRACKER)->is_enabled())
     thd->session_tracker.get_tracker(SESSION_STATE_CHANGE_TRACKER)->mark_as_changed(thd, NULL);
   thd->protocol_text.init(thd);

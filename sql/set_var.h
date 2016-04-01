@@ -48,6 +48,9 @@ struct sys_var_chain
 int mysql_add_sys_var_chain(sys_var *chain);
 int mysql_del_sys_var_chain(sys_var *chain);
 
+
+extern const LEX_CSTRING SESSION_TRACK_SYSTEM_VARIABLES_NAME;
+
 /**
   A class representing one system variable - that is something
   that can be accessed as @@global.variable_name or @@session.variable_name,
@@ -240,6 +243,9 @@ protected:
 
   uchar *global_var_ptr()
   { return ((uchar*)&global_system_variables) + offset; }
+
+  friend class Session_sysvars_tracker;
+  friend class Session_tracker;
 };
 
 #include "sql_plugin.h"                    /* SHOW_HA_ROWS, SHOW_MY_BOOL */

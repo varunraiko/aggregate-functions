@@ -750,6 +750,136 @@ public:
   }
 };
 
+/**
+  Session Variable with global default and external storage
+*/
+class Sys_var_extstor;
+typedef bool (Sys_var_extstor::*constructor)(THD *thd, char *val,
+                                             const size_t len);
+class Sys_var_extstor: public sys_var
+{
+public:
+  Sys_var_extstor(const char *name_arg,
+                  const char *comment,
+                  int flag_args,
+                  ptrdiff_t off,
+                  CMD_LINE getopt,
+                  const char *def_val,
+                  PolyLock *lock=0,
+                  enum binlog_status_enum binlog_status_arg=
+                    VARIABLE_NOT_IN_BINLOG,
+                  on_check_function on_check_func=0,
+                  on_update_function on_update_func=0,
+                  const char *substitute=0)
+    : sys_var(&all_sys_vars, name_arg, comment, flag_args,
+              off,
+              getopt.id,
+              getopt.arg_type, SHOW_CHAR, (intptr)def_val,
+              lock, binlog_status_arg, on_check_func, on_update_func,
+              substitute)
+  { option.var_type|= GET_STR; }
+  /* new interface */
+  virtual bool validate_value(THD *thd, const char *str, const size_t len)= 0;
+  virtual bool update_extstor_default(THD *thd)= 0;
+  virtual bool update_extstor(THD *thd, const char *str, const size_t len)= 0;
+  virtual bool update_extstor_global(THD *thd, const char *str,
+                                   const size_t len)= 0;
+  virtual size_t value_len(THD *thd)= 0;
+  virtual bool value_construct(THD *thd, char *val, const size_t len)= 0;
+  virtual size_t defvalue_len(THD *thd)= 0;
+  virtual bool defvalue_construct(THD *thd, char *val, const size_t len)= 0;
+
+private:
+  LEX_STRING make_value(THD *thd, size_t len, constructor constr)
+  {
+    DBUG_ENTER("Sys_var_extstor::make_value");
+    LEX_STRING res= {0,0};
+    char *buf= (char *)my_safe_alloca(len);
+    if (buf)
+    {
+      (this->*constr)(thd, buf, len);
+      res.length= strlen(buf);
+      DBUG_PRINT("info", ("res %u '%s'", (uint)res.length, buf));
+      if (thd) 
+        res.str= (char*) thd->memdup(buf, res.length + 1);
+      else
+        res.str= (char*) my_memdup(buf, res.length + 1, MYF(MY_WME));
+      my_safe_afree(buf, len);
+    }
+    DBUG_RETURN(res);
+  }
+
+public:
+
+  /* usual sys var */
+  bool do_check(THD *thd, set_var *var)
+  {
+    char buff[STRING_BUFFER_USUAL_SIZE];
+    String str(buff, sizeof(buff), system_charset_info), *res;
+    char *resstr;
+    size_t len;
+
+    if (!(res=var->value->val_str(&str)))
+    {
+      resstr= const_cast<char*>("");
+      len= 0;
+    }
+    else
+    {
+      resstr= thd->strmake(res->ptr(), res->length());
+      len= res->length();
+    }
+
+    if (validate_value(thd, resstr, len))
+      return true;
+    var->save_result.string_value.str= resstr;
+    var->save_result.string_value.length= len;
+
+    return false;
+  }
+  bool session_update(THD *thd, set_var *var)
+  {
+    const char *val= var->save_result.string_value.str;
+    const size_t len= var->save_result.string_value.length;
+    if (!var->value)
+      return update_extstor_default(thd);
+    else
+      return update_extstor(thd, val, len);
+  }
+  bool global_update(THD *thd, set_var *var)
+  {
+    return update_extstor_global(thd, var->save_result.string_value.str,
+                                 var->save_result.string_value.length);
+  }
+  void session_save_default(THD *thd, set_var *var)
+  {
+    var->save_result.string_value=
+      make_value(thd, defvalue_len(thd),
+                 &Sys_var_extstor::defvalue_construct);
+  }
+  void global_save_default(THD *thd, set_var *var)
+  {
+    char *ptr= (char*)(intptr)option.def_value;
+    var->save_result.string_value.str= ptr;
+    var->save_result.string_value.length= strlen(ptr);
+  }
+  uchar *session_value_ptr(THD *thd, const LEX_STRING *base)
+  {
+    LEX_STRING res= make_value(thd, value_len(thd),
+                               &Sys_var_extstor::value_construct);
+    return (uchar *)res.str;
+  }
+  uchar *global_value_ptr(THD *thd, const LEX_STRING *base)
+  {
+    LEX_STRING res= make_value(thd, defvalue_len(thd),
+                               &Sys_var_extstor::defvalue_construct);
+    return (uchar *)res.str;
+  }
+  uchar *default_value_ptr(THD *thd)
+  {
+    return (uchar *)(intptr)option.def_value;
+  }
+};
 
 #ifndef DBUG_OFF
 /**
@@ -763,7 +893,7 @@ public:
   This semantics is intentional, to be able to debug one session from
   another.
 */
-class Sys_var_dbug: public sys_var
+class Sys_var_dbug: public Sys_var_extstor
 {
 public:
   Sys_var_dbug(const char *name_arg,
@@ -774,61 +904,124 @@ public:
                on_check_function on_check_func=0,
                on_update_function on_update_func=0,
                const char *substitute=0)
-    : sys_var(&all_sys_vars, name_arg, comment, flag_args,
-              (char*)&current_dbug_option-(char*)&global_system_variables, getopt.id,
-              getopt.arg_type, SHOW_CHAR, (intptr)def_val,
-              lock, binlog_status_arg, on_check_func, on_update_func,
-              substitute)
-  { option.var_type|= GET_STR; }
-  bool do_check(THD *thd, set_var *var)
-  {
-    char buff[STRING_BUFFER_USUAL_SIZE];
-    String str(buff, sizeof(buff), system_charset_info), *res;
-
-    if (!(res=var->value->val_str(&str)))
-      var->save_result.string_value.str= const_cast<char*>("");
-    else
-      var->save_result.string_value.str= thd->strmake(res->ptr(), res->length());
-    return false;
-  }
-  bool session_update(THD *thd, set_var *var)
-  {
-    const char *val= var->save_result.string_value.str;
-    if (!var->value)
-      DBUG_POP();
-    else
-      DBUG_SET(val);
-    return false;
-  }
-  bool global_update(THD *thd, set_var *var)
-  {
-    const char *val= var->save_result.string_value.str;
-    DBUG_SET_INITIAL(val);
-    return false;
-  }
-  void session_save_default(THD *thd, set_var *var)
-  { }
-  void global_save_default(THD *thd, set_var *var)
-  {
-    char *ptr= (char*)(intptr)option.def_value;
-    var->save_result.string_value.str= ptr;
-  }
-  uchar *session_value_ptr(THD *thd, const LEX_STRING *base)
-  {
-    char buf[256];
-    DBUG_EXPLAIN(buf, sizeof(buf));
-    return (uchar*) thd->strdup(buf);
-  }
-  uchar *global_value_ptr(THD *thd, const LEX_STRING *base)
-  {
-    char buf[256];
-    DBUG_EXPLAIN_INITIAL(buf, sizeof(buf));
-    return (uchar*) thd->strdup(buf);
-  }
-  uchar *default_value_ptr(THD *thd)
-  { return (uchar*)""; }
+    : Sys_var_extstor(name_arg, comment, flag_args,
+                      ((char*)&current_dbug_option -
+                       (char*)&global_system_variables),
+                      getopt, def_val, lock, binlog_status_arg,
+                      on_check_func, on_update_func, substitute)
+  {}
+  virtual bool validate_value(THD *thd __attribute__((unused)),
+                              const char *str __attribute__((unused)),
+                              size_t len __attribute__((unused)))
+  { return false; }
+  virtual bool update_extstor_default(THD *thd __attribute__((unused)))
+  { DBUG_POP(); return false; }
+  virtual bool update_extstor(THD *thd __attribute__((unused)),
+                              const char *str,
+                              size_t len __attribute__((unused)))
+  { DBUG_SET(str); return false; }
+  virtual bool update_extstor_global(THD *thd __attribute__((unused)),
+                                     const char *str,
+                                     size_t len __attribute__((unused)))
+  { DBUG_SET_INITIAL(str); return false; }
+  virtual size_t value_len(THD *thd __attribute__((unused)))
+  { return 256; }
+  virtual bool value_construct(THD *thd __attribute__((unused)),
+                               char *val, size_t len)
+  { DBUG_EXPLAIN(val, len); return false; }
+  virtual size_t defvalue_len(THD *thd __attribute__((unused)))
+  { return 256; }
+  virtual bool defvalue_construct(THD *thd __attribute__((unused)),
+                                  char *val, size_t len)
+  { DBUG_EXPLAIN_INITIAL(val, len); return false; }
 };
 #endif
+
+class Sys_var_sesvartrack: public Sys_var_extstor
+{
+  LEX_STRING global_val;
+public:
+  Sys_var_sesvartrack(const char *name_arg,
+                      const char *comment, int flag_args,
+                      CMD_LINE getopt,
+                      const char *def_val, PolyLock *lock=0,
+                      enum binlog_status_enum
+                        binlog_status_arg=VARIABLE_NOT_IN_BINLOG,
+                      on_check_function on_check_func=0,
+                      on_update_function on_update_func=0,
+                      const char *substitute=0)
+    : Sys_var_extstor(name_arg, comment, flag_args,
+                      ((char*)&current_session_track_system_variables -
+                       (char*)&global_system_variables),
+                      getopt, def_val, lock, binlog_status_arg,
+                      on_check_func, on_update_func, substitute)
+  {
+    global_val.str= NULL;
+    global_val.length= 0;
+    update_extstor_global(NULL, def_val, strlen(def_val));
+  }
+  virtual bool validate_value(THD *thd,
+                              const char *str,
+                              size_t len)
+  { return sysvartrack_validate_value(thd, str, len); }
+  virtual bool update_extstor_default(THD *thd)
+  { return update_extstor(thd, global_val.str, global_val.length); }
+  virtual bool update_extstor(THD *thd,
+                              const char *str __attribute__((unused)),
+                              size_t len __attribute__((unused)))
+  { return sysvartrack_update(thd); }
+  virtual bool update_extstor_global(THD *thd,
+                                     const char *str,
+                                     size_t len)
+  {
+    if (thd)
+    {
+      /*
+        Do not validate during constructing:
+        1) Default value is correct
+        2) boot value will be validated later
+      */
+      if (validate_value(thd, str, len))
+        return true;
+    }
+    if (global_val.str)
+      my_free(global_val.str);
+    if (str)
+    {
+      char *new_str= (char *)my_memdup(str, len + 1, MYF(MY_WME));
+      if (!new_str)
+        return true;
+      global_val.str= new_str;
+      global_val.length= len;
+    }
+    else
+    {
+      global_val.str= NULL;
+      global_val.length= 0;
+    }
+    return false;
+  }
+  virtual size_t value_len(THD *thd)
+  { return sysvartrack_value_len(thd); }
+  virtual bool value_construct(THD *thd, char *val, size_t len)
+  { return sysvartrack_value_construct(thd, val, len); }
+  virtual size_t defvalue_len(THD *thd __attribute__((unused)))
+  { return global_val.length + 1; }
+  virtual bool defvalue_construct(THD *thd __attribute__((unused)),
+                                  char *val, size_t len)
+  { memcpy(val, global_val.str, global_val.length + 1); return false; }
+
+  void cleanup()
+  {
+    if (global_val.str)
+    {
+      my_free(global_val.str);
+      global_val.str= NULL;
+      global_val.length= 0;
+    }
+
+  }
+};
 
 #define KEYCACHE_VAR(X) GLOBAL_VAR(dflt_key_cache_var.X)
 #define keycache_var_ptr(KC, OFF) (((uchar*)(KC))+(OFF))

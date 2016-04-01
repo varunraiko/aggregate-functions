@@ -2785,6 +2785,7 @@ sys_var *find_sys_var_ex(THD *thd, const char *str, size_t length,
   sys_var_pluginvar *pi= NULL;
   plugin_ref plugin;
   DBUG_ENTER("find_sys_var_ex");
+  DBUG_PRINT("enter", ("var '%.*s'", (int)length, str));
 
   if (!locked)
     mysql_mutex_lock(&LOCK_plugin);
@@ -2810,7 +2811,7 @@ sys_var *find_sys_var_ex(THD *thd, const char *str, size_t length,
     mysql_mutex_unlock(&LOCK_plugin);
 
   if (!throw_error && !var)
-    my_error(ER_UNKNOWN_SYSTEM_VARIABLE, MYF(0), (char*) str);
+    my_error(ER_UNKNOWN_SYSTEM_VARIABLE, MYF(0), (int)length, (char*) str);
   DBUG_RETURN(var);
 }
 
