@@ -42,6 +42,10 @@
     <Condition Message="A more recent version of [ProductName] is already installed. Setup will now exit.">
       NOT NEWERVERSIONDETECTED OR Installed
     </Condition>
+    <Condition Message="This application is only supported on Windows 7, Windows Server 2008 R2, or higher.">
+    <![CDATA[Installed OR (VersionNT >= 601)]]>
+    </Condition>
+
     <InstallExecuteSequence>
       <RemoveExistingProducts After="InstallFinalize"/>
     </InstallExecuteSequence>
