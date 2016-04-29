@@ -6121,7 +6121,6 @@ void ha_fake_trx_id(THD *thd)
     else
       hton->fake_trx_id(hton, thd);
     ha_info_next= ha_info->next();
-    ha_info->reset(); /* keep it conveniently zero-filled */
   }
   DBUG_VOID_RETURN;
 }
