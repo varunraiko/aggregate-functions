@@ -1,6 +1,6 @@
 {
   "name": "Aggregate Functions",
   "tagline": "MariaDB server is a community developed fork of MySQL server. Started by core members of the original MySQL team, MariaDB actively works with outside developers to deliver the most featureful, stable, and sanely licensed open SQL server in the industry.",
-  "body": "## ### Introduction\r\n\r\nMost of the current databases like Oracle, PostgreSQL, HSQL support the notion of CREATING AGGREGATE FUNCTIONS . This notion is missing from MariaDB, so this project deals with creating the support for aggregate functions for MariaDB. To incorporate the support for the aggregate stored functions first we had to form the syntax for these functions and then a design plan on how we are going to implement these functions. \r\n\r\n## ### Work Done\r\n\r\n### Authors and Contributors\r\n",
+  "body": "## Introduction\r\n\r\nMost of the current databases like Oracle, PostgreSQL, HSQL support the notion of CREATING AGGREGATE FUNCTIONS . This notion is missing from MariaDB, so this project deals with creating the support for aggregate functions for MariaDB. To incorporate the support for the aggregate stored functions first we had to form the syntax for these functions and then a design plan on how we are going to implement these functions. \r\n\r\n## Work Done\r\n\r\n## Authors and Contributors\r\n",
   "note": "Don't delete this file! It's used internally to help with page regeneration."
 }
