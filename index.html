@@ -42,9 +42,13 @@ and then the function resumes execution.</p>
 
 <p>Link to the <a href="https://github.com/MariaDB/server/commit/65782a2a6b5ad3db466953b6ea46f87de2616723">commit</a></p>
 </li>
-<li><p>Added an agg_type field to the st_sp_chistics. This has been added to help us store in the mysql.proc table whether a function is aggregate, window or normal function.
-Link to the <a href="https://github.com/varunraiko/aggregate-functions/blob/aggregate-functions/sql/sql_lex.h#L170-L176">type aggregate_type</a>.
-Link to the field added to the <a href="https://github.com/varunraiko/aggregate-functions/blob/aggregate-functions/sql/sql_lex.h#L1104-L1111">st_sp_chistics</a>.</p></li>
+<li>
+<p>Added an agg_type field to the st_sp_chistics. This has been added to help us store in the mysql.proc table whether a function is aggregate, window or normal function.</p>
+
+<p>Link to the <a href="https://github.com/varunraiko/aggregate-functions/blob/aggregate-functions/sql/sql_lex.h#L170-L176">type aggregate_type</a>.</p>
+
+<p>Link to the field added to the <a href="https://github.com/varunraiko/aggregate-functions/blob/aggregate-functions/sql/sql_lex.h#L1104-L1111">st_sp_chistics</a>.</p>
+</li>
 <li><p>Alter and show Aggregate functions:
 The create query should store if the function is an aggregate function or not in the aggregate
 field of the mysql.proc table.
