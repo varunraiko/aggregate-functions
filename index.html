@@ -27,13 +27,52 @@
 <h2>
 <a id="work-done" class="anchor" href="#work-done" aria-hidden="true"><span aria-hidden="true" class="octicon octicon-link"></span></a>Work Done</h2>
 
-<ol>
-<li><p>Added the AGGREGATE symbol to the parser. Also added the FETCH GROUP NEXT ROW instruction(exclusive for aggregate functions) to the parser.</p></li>
-<li>
-</ol>
+<h3>
+<a id="adding-the-syntax-to-the-parser" class="anchor" href="#adding-the-syntax-to-the-parser" aria-hidden="true"><span aria-hidden="true" class="octicon octicon-link"></span></a>Adding the syntax to the parser</h3>
 
-<h2>
-<a id="authors-and-contributors" class="anchor" href="#authors-and-contributors" aria-hidden="true"><span aria-hidden="true" class="octicon octicon-link"></span></a>Authors and Contributors</h2>
+<ul>
+<li> Added the AGGREGATE keyword to the parser, so as to support the new syntax for creating aggregate functions. A test has been written
+to check that the parser parses the AGGREGATE keyword correctly.</li>
+</ul>
+
+<p>link to the test: <a href="https://github.com/MariaDB/server/commit/b3577bcdbb9cd4c269a57cadc62ac04dd42f0ca4">https://github.com/MariaDB/server/commit/b3577bcdbb9cd4c269a57cadc62ac04dd42f0ca4</a></p>
+
+<ul>
+<li> Added an agg_type field to the sp_chistics.</li>
+</ul>
+
+<p>link:</p>
+
+<ul>
+<li><p>Added the FETCH GROUP NEXT ROW instruction: This instruction is exclusive for aggregate functions.This instruction is added to make
+a temporary exit from the function execution. After the temporary exit is made the values are set to the parameters of the function
+and then the function resumes execution.</p></li>
+<li><p>Alter and show Aggregate functions:
+The create query should store if the function is an aggregate function or not in the aggregate
+field of the mysql.proc table.
+Alter query should allow user to change the aggregate field of the mysql.proc table.</p></li>
+</ul>
+
+<h3>
+<a id="added-the-implementation-of-the-item_sum_sp-class" class="anchor" href="#added-the-implementation-of-the-item_sum_sp-class" aria-hidden="true"><span aria-hidden="true" class="octicon octicon-link"></span></a>Added the implementation of the item_sum_sp class</h3>
+
+<p>1) Item_sum_sp class inherited from Item_sum
+2) Add function
+3) val_xxxx</p>
+
+<h3>
+<a id="adding-the-execution-of-aggregate-functions" class="anchor" href="#adding-the-execution-of-aggregate-functions" aria-hidden="true"><span aria-hidden="true" class="octicon octicon-link"></span></a>Adding the execution of aggregate functions</h3>
+
+<p>1)sp_head::execute_aggregate_function
+2) sp_head::execute_agg</p>
+
+<h3>
+<a id="approach-taken" class="anchor" href="#approach-taken" aria-hidden="true"><span aria-hidden="true" class="octicon octicon-link"></span></a>Approach taken</h3>
+
+<p>1) Cursor approach</p>
+
+<h3>
+<a id="testing" class="anchor" href="#testing" aria-hidden="true"><span aria-hidden="true" class="octicon octicon-link"></span></a>Testing</h3>
 
       <footer class="site-footer">
         <span class="site-footer-owner"><a href="https://github.com/varunraiko/aggregate-functions">Aggregate Functions</a> is maintained by <a href="https://github.com/varunraiko">varunraiko</a>.</span>
