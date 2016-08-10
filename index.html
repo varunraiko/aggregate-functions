@@ -28,23 +28,18 @@
 <a id="work-done" class="anchor" href="#work-done" aria-hidden="true"><span aria-hidden="true" class="octicon octicon-link"></span></a>Work Done</h2>
 
 <h3>
-<a id="adding-the-syntax-to-the-parser" class="anchor" href="#adding-the-syntax-to-the-parser" aria-hidden="true"><span aria-hidden="true" class="octicon octicon-link"></span></a>Adding the syntax to the parser</h3>
+<a id="added-the-syntax-for-the-aggregate-functions-to-the-parser" class="anchor" href="#added-the-syntax-for-the-aggregate-functions-to-the-parser" aria-hidden="true"><span aria-hidden="true" class="octicon octicon-link"></span></a>Added the syntax for the Aggregate Functions to the parser</h3>
 
 <ul>
 <li>
-<p>Added the AGGREGATE keyword to the parser, so as to support the new syntax for creating aggregate functions. A test has been written to check that the parser parses the AGGREGATE keyword correctly.</p>
+<p>Added the AGGREGATE symbol to the parser. A test has been written to check that the parser parses the AGGREGATE keyword correctly.</p>
 
-<p>Link to the <a href="https://github.com/MariaDB/server/commit/b3577bcdbb9cd4c269a57cadc62ac04dd42f0ca4">test</a></p>
+<p>Link to the <a href="https://github.com/MariaDB/server/commit/dbff33cc32ec0c4a90327a7c91a930b34e16e4f3">commit</a></p>
 </li>
+<li><p>Added the FETCH GROUP NEXT ROW instruction: This instruction is exclusive for aggregate functions.This instruction is added to make a temporary exit from the function execution. After the temporary exit is made the values are set to the parameters of the function
+and then the function resumes execution.
+Link to the <a href="https://github.com/MariaDB/server/commit/65782a2a6b5ad3db466953b6ea46f87de2616723">commit</a></p></li>
 <li><p>Added an agg_type field to the sp_chistics.</p></li>
-</ul>
-
-<p>link:</p>
-
-<ul>
-<li><p>Added the FETCH GROUP NEXT ROW instruction: This instruction is exclusive for aggregate functions.This instruction is added to make
-a temporary exit from the function execution. After the temporary exit is made the values are set to the parameters of the function
-and then the function resumes execution.</p></li>
 <li><p>Alter and show Aggregate functions:
 The create query should store if the function is an aggregate function or not in the aggregate
 field of the mysql.proc table.
