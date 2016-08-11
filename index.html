@@ -75,13 +75,13 @@ A new instruction FETCH GROUP NEXT ROW instruction is introduced. This instructi
 There is a field pause_state in the class sp_context. </p>
 
 <p>a) PAUSE STATE is <a href="https://github.com/varunraiko/aggregate-functions/blob/aggregate-functions/sql/sp_head.cc#L4566-L4569">TRUE</a>: In this case, the function enters the pause state and we save the
-   state of the function. The instruction pointer continues to point to the FETCH GROUP NEXT ROW
+   state of the function. The instruction pointer(instr_ptr) continues to point to the FETCH GROUP NEXT ROW
    instruction, and the function makes a temporary pause in its execution and that the state of the
    function is saved. The function is paused so that next row values can be set for the function's
    arguments. After the values are passed to the arguments the function resumes execution.</p>
 
 <p>b) PAUSE STATE is <a href="https://github.com/varunraiko/aggregate-functions/blob/aggregate-functions/sql/sp_head.cc#L4570-L4582">FALSE</a>: In this case, the function exits from the pause state and resumes
-   execution. The instrunction pointer is then incremented and now it points to the next
+   execution. The instruction pointer(instr_ptr) is then incremented and now it points to the next
    instruction to be executed.</p>
 
 <h3>
