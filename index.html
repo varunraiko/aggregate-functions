@@ -70,31 +70,25 @@ Alter query should allow user to change the aggregate field of the mysql.proc ta
 <p>This class is inherited from the Item_sum class.This class mainly deals with the concept of making an interface which allows user to execute aggregate functions.For executing the
 aggregate functions we have taken a special cursor approach.</p>
 
-<p>1) Cursor Approach:
+<ol>
+<li>
+<p><strong>Cursor Approach</strong>:
 A new instruction FETCH GROUP NEXT ROW instruction is introduced. This instruction handles the state the aggregate function is currently in.
 There is a field pause_state in the class sp_context. </p>
 
 <ul>
-<li><p>PAUSE STATE is <a href="https://github.com/varunraiko/aggregate-functions/blob/aggregate-functions/sql/sp_head.cc#L4566-L4569">TRUE</a>: In this case, the function enters the pause state and we save the
+<li><p><strong>pause_state is <a href="https://github.com/varunraiko/aggregate-functions/blob/aggregate-functions/sql/sp_head.cc#L4566-L4569">TRUE</a></strong>: In this case, the function enters the pause state and we save the
 state of the function. The instruction pointer(instr_ptr) continues to point to the FETCH GROUP NEXT ROW
 instruction, and the function makes a temporary pause in its execution and that the state of the
 function is saved. The function is paused so that next row values can be set for the function's
 arguments. After the values are passed to the arguments the function resumes execution.</p></li>
-<li>
-<p>PAUSE STATE is <a href="https://github.com/varunraiko/aggregate-functions/blob/aggregate-functions/sql/sp_head.cc#L4570-L4582">FALSE</a>: In this case, the function exits from the pause state and resumes
+<li><p><strong>pause_state is <a href="https://github.com/varunraiko/aggregate-functions/blob/aggregate-functions/sql/sp_head.cc#L4570-L4582">FALSE</a></strong>: In this case, the function exits from the pause state and resumes
 execution. The instruction pointer(instr_ptr) is then incremented and now it points to the next
-instruction to be executed.</p>
-
-<h3>
-<a id="added-the-execution-of-aggregate-functions" class="anchor" href="#added-the-execution-of-aggregate-functions" aria-hidden="true"><span aria-hidden="true" class="octicon octicon-link"></span></a>Added the execution of aggregate functions</h3>
-</li>
+instruction to be executed.</p></li>
 </ul>
-
-<p>1)sp_head::execute_aggregate_function
-2) sp_head::execute_agg</p>
-
-<h3>
-<a id="testing" class="anchor" href="#testing" aria-hidden="true"><span aria-hidden="true" class="octicon octicon-link"></span></a>Testing</h3>
+</li>
+<li><p><strong>Item_sum_sp::add() function added</strong>: </p></li>
+</ol>
 
       <footer class="site-footer">
         <span class="site-footer-owner"><a href="https://github.com/varunraiko/aggregate-functions">Aggregate Functions</a> is maintained by <a href="https://github.com/varunraiko">varunraiko</a>.</span>
