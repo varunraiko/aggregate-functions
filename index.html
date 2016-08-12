@@ -90,12 +90,9 @@ instruction to be executed.</p></li>
 <li>
 <p><strong>[Item_sum_sp::add()] function added</strong>: This function handles everything that is done regarding the aggregation of values.</p>
 
-<ul>
-<li>[execute_impl()]</li>
-<li>[sp_head::execute_aggregate_function]<br>
-</li>
-<li>[sp_head::execute_agg]</li>
-</ul>
+<p>*** [execute_impl()]:** Execute function and store the return value in the field. This is called from the add() function to aggregate the values and from execute() to return the value in the sp_result_field(field defined in the Item_sum_sp class).</p>
+
+<p>*** [sp_head::execute_aggregate_function()]:** This function is called from the execute_impl function. In this function the run-time context([func_ctx]) is created. I have followed a different approach when the function fetches the row so as to set the values to the parameters. When we call the function for the first time(that is when the first row is fetched), the run-time context is created but the values to the arguments are not set. These values are set when we encounter a FETCH GROUP NEXT ROW instruction and pause the aggregate function. Then after the pause, the parameters are passed the value and the function resumes execution. For the next fetch we don't need to create the context as we preserve the earlier run-time context(func_ctx). The values to the parameter are set straight away and then the rest of the instructions are executed.    </p>
 </li>
 <li><p><strong>Item_sum_sp::val_xxx() functions added</strong>:</p></li>
 </ol>
