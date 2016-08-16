@@ -98,6 +98,10 @@ instruction to be executed.</p></li>
 <li><p><strong><a href="https://github.com/varunraiko/aggregate-functions/blob/aggregate-functions/sql/item_sum.h#L1142-L1180">Item_sum_sp::val_xxx()</a> functions added</strong>: This function gets the return value for the current aggregate function and stores the value in the result field. A signal is send in the field <a href="https://github.com/varunraiko/aggregate-functions/blob/aggregate-functions/sql/item_sum.cc#L1488">server_status</a>. The value for server status is set to SERVER_STATUS_LAST_ROW_SENT. This implies that all the rows have been fetched and now we need to throw an error that there is no more data (<a href="https://github.com/varunraiko/aggregate-functions/blob/aggregate-functions/sql/sp_head.cc#L4574-L4579">ER_SP_FETCH_NO_DATA</a>), so this error is handled by the handler. The handler handles the error and the function execution is complete.</p></li>
 </ol>
 
+<h3>
+<a id="all-commits" class="anchor" href="#all-commits" aria-hidden="true"><span aria-hidden="true" class="octicon octicon-link"></span></a><a href="https://github.com/varunraiko/aggregate-functions/commits/aggregate-functions?author=varunraiko"><strong>All Commits</strong></a>
+</h3>
+
       <footer class="site-footer">
         <span class="site-footer-owner"><a href="https://github.com/varunraiko/aggregate-functions">Aggregate Functions</a> is maintained by <a href="https://github.com/varunraiko">varunraiko</a>.</span>
 
