@@ -98,6 +98,81 @@ instruction to be executed.</p></li>
 <li><p><strong><a href="https://github.com/varunraiko/aggregate-functions/blob/aggregate-functions/sql/item_sum.h#L1142-L1180">Item_sum_sp::val_xxx()</a> functions added</strong>: This function gets the return value for the current aggregate function and stores the value in the result field. A signal is send in the field <a href="https://github.com/varunraiko/aggregate-functions/blob/aggregate-functions/sql/item_sum.cc#L1488">server_status</a>. The value for server status is set to SERVER_STATUS_LAST_ROW_SENT. This implies that all the rows have been fetched and now we need to throw an error that there is no more data (<a href="https://github.com/varunraiko/aggregate-functions/blob/aggregate-functions/sql/sp_head.cc#L4574-L4579">ER_SP_FETCH_NO_DATA</a>), so this error is handled by the handler. The handler handles the error and the function execution is complete.</p></li>
 </ol>
 
+<p><strong>FEW EXAMPLES</strong>
+Well now lets see some examples to understand how these functions work.</p>
+
+<p>CREATE AGGREGATE FUNCTION function_name (parameters) RETURNS return_type
+BEGIN
+      All types of declarations
+      DECLARE CONTINUE HANDLER FOR NOT FOUND RETURN return_val;
+      LOOP
+       FETCH GROUP NEXT ROW; 
+       Some instructions
+      END LOOP;
+END|</p>
+
+<p>This would be the syntax and structure for the aggregate functions.
+<strong>FETCH GROUP NEXT ROW</strong> is the essential instruction for the aggregate. It fetches the next row of the table. It is by this instruction the values to the parameters are set.</p>
+
+<p>So let us say we take an example where we have a table which contains details about a student and his/her marks in two subjects( Subject A and Subject B). 
+Our table MARKS would have the fields ( Student, Roll Number, Marks in Subject A, Marks in Subject B), with Roll Number as the primary key</p>
+
+<p>So we need to find the answer to few queries</p>
+
+<p><strong>Find the number of students in the class.</strong>
+For this query , we can create an aggregate function to count the number of entries in the table.
+Let us name the function , aggregate_count and it accepts one parameter that is Roll Number.</p>
+
+<p>CREATE AGGREGATE FUNCTION aggregate_count(x DOUBLE) RETURNS INT
+BEGIN
+      DECLARE  count_students INT DEFAULT 0;
+      DECLARE CONTINUE HANDLER FOR NOT FOUND RETURN count_students;<br>
+      LOOP
+       FETCH GROUP NEXT ROW;
+       IF x  THEN
+       SET count_students = count_students+1;
+       END IF;
+      END LOOP;
+END|</p>
+
+<p>The query to get the answer would be:
+         SELECT aggregate_count(roll_number) from MARKS;</p>
+
+<p><strong>Find the total marks scored by all students in Subject A</strong>
+For this query we can create an aggregate function to calculate the total sum of marks of all the student for the Subject A.
+Let us name the function total_sum, with parameters marks of a subject.</p>
+
+<p>CREATE AGGREGATE FUNCTION aggregate_total_sum(x DOUBLE) RETURNS INT
+BEGIN
+      DECLARE  total_marks INT DEFAULT 0;
+      DECLARE CONTINUE HANDLER FOR NOT FOUND RETURN count_students;<br>
+      LOOP
+       FETCH GROUP NEXT ROW;
+       SET total_marks = total_marks+x;
+      END LOOP;
+END|</p>
+
+<p>SELECT aggregate_total_sum(marks_A) from MARKS;</p>
+
+<p><strong>Find the average marks of the class(including both subjects)</strong>
+We can perform this query in various cases. We can create another aggregate function that would calculate the average of the marks in both the subject or we could use the aggregate functions defined above, calling them from normal functions.</p>
+
+<p>CREATE FUNCTION average() RETURNS DOUBLE
+BEGIN<br>
+       DECLARE  total_marks INT DEFAULT 0;
+       DECLARE  count_students INT DEFAULT 0;
+       SET count_students= (SELECT aggregate_count(roll_number) from MARKS);
+       SET total_marks= (SELECT aggregate_total_sum(marks_A) from MARKS)+
+                                     (SELECT aggregate_total_sum(marks_B) from MARKS);
+      IF count_students = 0 then
+             RETURN 0;
+      ELSE 
+            RETURN total_marks/count_students;
+      END IF;
+END|</p>
+
+<p>Select average();</p>
+
 <h3>
 <a id="all-commits" class="anchor" href="#all-commits" aria-hidden="true"><span aria-hidden="true" class="octicon octicon-link"></span></a><a href="https://github.com/varunraiko/aggregate-functions/commits/aggregate-functions?author=varunraiko"><strong>All Commits</strong></a>
 </h3>
