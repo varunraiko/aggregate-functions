@@ -208,7 +208,7 @@ END|
 
 <p>So these examples help us understand how the aggregate function work. The main points for that we need to keep in mind while writing aggregate functions and queries calling these functions are:<br>
 1. FETCH GROUP NEXT ROW instruction fetches the next row and then the values are set to the parameters of the function.<br>
-2. When all the rows are fetched then we exit from the loop body and then in the handler declaration , the value of the function is returned.<br>
+2. When all the rows are fetched then we exit from the loop body and then in the handler declaration, the value of the function is returned.<br>
 3. The GROUP BY , ORDER and SORT all clauses work with the aggregate functions , so they can be included while writing the SQL query depending on the needs.<br>
 4. The values to the parameters get set after the FETCH GROUP NEXT ROW instruction, so we should not use parameter values to initialize other values as these maybe garbage values before the FETCH GROUP NEXT ROW instruction.  </p>
 
