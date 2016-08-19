@@ -101,15 +101,16 @@ instruction to be executed.</p></li>
 <p><strong>FEW EXAMPLES</strong>
 Well now lets see some examples to understand how these functions work.</p>
 
-<p>CREATE AGGREGATE FUNCTION function_name (parameters) RETURNS return_type<br>
-BEGIN<br>
-      All types of declarations<br>
-      DECLARE CONTINUE HANDLER FOR NOT FOUND RETURN return_val;<br>
-      LOOP<br>
-       FETCH GROUP NEXT ROW;<br>
-       Some instructions<br>
-      END LOOP;<br>
-END|  </p>
+<pre><code>CREATE AGGREGATE FUNCTION function_name (parameters) RETURNS return_type  
+BEGIN  
+      All types of declarations  
+      DECLARE CONTINUE HANDLER FOR NOT FOUND RETURN return_val;  
+      LOOP  
+           FETCH GROUP NEXT ROW;  
+           Some instructions  
+      END LOOP; 
+END|  
+</code></pre>
 
 <p>This would be the syntax and structure for the aggregate functions.<br>
 <strong>FETCH GROUP NEXT ROW</strong> is the essential instruction for the aggregate. It fetches the next row of the table. It is by this instruction the values to the parameters are set.  </p>
@@ -123,55 +124,57 @@ Our table MARKS would have the fields ( Student, Roll Number, Marks in Subject A
 For this query , we can create an aggregate function to count the number of entries in the table.<br>
 Let us name the function , aggregate_count and it accepts one parameter that is Roll Number.  </p>
 
-<p>CREATE AGGREGATE FUNCTION aggregate_count(x DOUBLE) RETURNS INT<br>
-BEGIN<br>
-      DECLARE  count_students INT DEFAULT 0;<br>
-      DECLARE CONTINUE HANDLER FOR NOT FOUND RETURN count_students;<br>
-      LOOP<br>
-       FETCH GROUP NEXT ROW;<br>
-       IF x  THEN<br>
-       SET count_students = count_students+1;<br>
-       END IF;<br>
-      END LOOP;<br>
-END|  </p>
+<pre><code>CREATE AGGREGATE FUNCTION aggregate_count(x DOUBLE) RETURNS INT  
+BEGIN  
+      DECLARE  count_students INT DEFAULT 0;  
+      DECLARE CONTINUE HANDLER FOR NOT FOUND RETURN count_students;       
+      LOOP  
+          FETCH GROUP NEXT ROW;  
+          IF x  THEN  
+               SET count_students = count_students+1;  
+          END IF;  
+      END LOOP;  
+END|  
+</code></pre>
 
-<p>The query to get the answer would be:<br>
-         SELECT aggregate_count(roll_number) from MARKS;  </p>
+<p>To get the answer we can write a simple SELECT query by calling the aggregate_count function and sending roll numbers as the parameters.  </p>
 
 <p><strong>Find the total marks scored by all students in Subject A</strong><br>
 For this query we can create an aggregate function to calculate the total sum of marks of all the student for the Subject A.<br>
 Let us name the function total_sum, with parameters marks of a subject.  </p>
 
-<p>CREATE AGGREGATE FUNCTION aggregate_total_sum(x DOUBLE) RETURNS INT<br>
-BEGIN<br>
-      DECLARE  total_marks INT DEFAULT 0;<br>
-      DECLARE CONTINUE HANDLER FOR NOT FOUND RETURN count_students;<br>
-      LOOP<br>
-       FETCH GROUP NEXT ROW;<br>
-       SET total_marks = total_marks+x;<br>
-      END LOOP;<br>
-END|  </p>
+<pre><code>CREATE AGGREGATE FUNCTION aggregate_total_sum(x DOUBLE) RETURNS INT  
+BEGIN  
+      DECLARE  total_marks INT DEFAULT 0;  
+      DECLARE CONTINUE HANDLER FOR NOT FOUND RETURN count_students;       
+      LOOP  
+          FETCH GROUP NEXT ROW;  
+          SET total_marks = total_marks+x;  
+      END LOOP;  
+END|  
+</code></pre>
 
-<p>SELECT aggregate_total_sum(marks_A) from MARKS;  </p>
+<p>To get the answer we can write a SELECT query by calling the aggregate_total_sum function and sending marks of a subject as the parameters.  </p>
 
 <p><strong>Find the average marks of the class(including both subjects)</strong><br>
 We can perform this query in various cases. We can create another aggregate function that would calculate the average of the marks in both the subject or we could use the aggregate functions defined above, calling them from normal functions.  </p>
 
-<p>CREATE FUNCTION average() RETURNS DOUBLE<br>
-BEGIN<br>
-       DECLARE  total_marks INT DEFAULT 0;<br>
-       DECLARE  count_students INT DEFAULT 0;<br>
-       SET count_students= (SELECT aggregate_count(roll_number) from MARKS);<br>
-       SET total_marks= (SELECT aggregate_total_sum(marks_A) from MARKS)+<br>
-                                     (SELECT aggregate_total_sum(marks_B) from MARKS);<br>
-      IF count_students = 0 then<br>
-             RETURN 0;<br>
-      ELSE<br>
-            RETURN total_marks/count_students;<br>
-      END IF;<br>
-END|  </p>
+<pre><code>CREATE FUNCTION average() RETURNS DOUBLE  
+BEGIN   
+       DECLARE  total_marks INT DEFAULT 0;  
+       DECLARE  count_students INT DEFAULT 0;  
+       SET count_students= (SELECT aggregate_count(roll_number) from MARKS);  
+       SET total_marks= (SELECT aggregate_total_sum(marks_A) from MARKS)+  
+                           (SELECT aggregate_total_sum(marks_B)from MARKS);  
+      IF count_students = 0 then  
+             RETURN 0;  
+      ELSE  
+            RETURN total_marks/count_students;  
+      END IF;  
+END|  
+</code></pre>
 
-<p>Select average();  </p>
+<p>To get the answer we can write a SELECT query by calling the average function.  </p>
 
 <h3>
 <a id="all-commits" class="anchor" href="#all-commits" aria-hidden="true"><span aria-hidden="true" class="octicon octicon-link"></span></a><a href="https://github.com/varunraiko/aggregate-functions/commits/aggregate-functions?author=varunraiko"><strong>All Commits</strong></a>
