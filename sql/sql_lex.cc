@@ -29,6 +29,7 @@
 #include "sp_head.h"
 #include "sp.h"
 #include "sql_select.h"
+#include "sql_cte.h"
 
 static int lex_one_token(YYSTYPE *yylval, THD *thd);
 
@@ -668,11 +669,15 @@ void lex_start(THD *thd)
   /* 'parent_lex' is used in init_query() so it must be before it. */
   lex->select_lex.parent_lex= lex;
   lex->select_lex.init_query();
+  lex->curr_with_clause= 0;
+  lex->with_clauses_list= 0;
+  lex->with_clauses_list_last_next= &lex->with_clauses_list;
   lex->value_list.empty();
   lex->update_list.empty();
   lex->set_var_list.empty();
   lex->param_list.empty();
   lex->view_list.empty();
+  lex->with_column_list.empty();
   lex->with_persistent_for_clause= FALSE;
   lex->column_list= NULL;
   lex->index_list= NULL;
@@ -703,7 +708,6 @@ void lex_start(THD *thd)
   lex->parsing_options.reset();
   lex->empty_field_list_on_rset= 0;
   lex->select_lex.select_number= 1;
-  lex->length=0;
   lex->part_info= 0;
   lex->select_lex.in_sum_expr=0;
   lex->select_lex.ftfunc_list_alloc.empty();
@@ -743,6 +747,14 @@ void lex_start(THD *thd)
   lex->var_list.empty();
   lex->stmt_var_list.empty();
   lex->proc_list.elements=0;
+
+  lex->save_group_list.empty();
+  lex->save_order_list.empty();
+  lex->win_ref= NULL;
+  lex->win_frame= NULL;
+  lex->frame_top_bound= NULL;
+  lex->frame_bottom_bound= NULL;
+  lex->win_spec= NULL;
 
   lex->is_lex_started= TRUE;
   DBUG_VOID_RETURN;
@@ -1407,28 +1419,22 @@ static int lex_one_token(YYSTYPE *yylval, THD *thd)
       if (use_mb(cs))
       {
 	result_state= IDENT_QUOTED;
-        if (my_mbcharlen(cs, lip->yyGetLast()) > 1)
+        int char_length= my_charlen(cs, lip->get_ptr() - 1,
+                                        lip->get_end_of_query());
+        if (char_length <= 0)
         {
-          int l = my_ismbchar(cs,
-                              lip->get_ptr() -1,
-                              lip->get_end_of_query());
-          if (l == 0) {
-            state = MY_LEX_CHAR;
-            continue;
-          }
-          lip->skip_binary(l - 1);
+          state= MY_LEX_CHAR;
+          continue;
         }
+        lip->skip_binary(char_length - 1);
+
         while (ident_map[c=lip->yyGet()])
         {
-          if (my_mbcharlen(cs, c) > 1)
-          {
-            int l;
-            if ((l = my_ismbchar(cs,
-                                 lip->get_ptr() -1,
-                                 lip->get_end_of_query())) == 0)
-              break;
-            lip->skip_binary(l-1);
-          }
+          char_length= my_charlen(cs, lip->get_ptr() - 1,
+                                      lip->get_end_of_query());
+          if (char_length <= 0)
+            break;
+          lip->skip_binary(char_length - 1);
         }
       }
       else
@@ -1569,15 +1575,11 @@ static int lex_one_token(YYSTYPE *yylval, THD *thd)
 	result_state= IDENT_QUOTED;
         while (ident_map[c=lip->yyGet()])
         {
-          if (my_mbcharlen(cs, c) > 1)
-          {
-            int l;
-            if ((l = my_ismbchar(cs,
-                                 lip->get_ptr() -1,
-                                 lip->get_end_of_query())) == 0)
-              break;
-            lip->skip_binary(l-1);
-          }
+          int char_length= my_charlen(cs, lip->get_ptr() - 1,
+                                          lip->get_end_of_query());
+          if (char_length <= 0)
+            break;
+          lip->skip_binary(char_length - 1);
         }
       }
       else
@@ -1605,8 +1607,9 @@ static int lex_one_token(YYSTYPE *yylval, THD *thd)
       char quote_char= c;                       // Used char
       while ((c=lip->yyGet()))
       {
-	int var_length;
-	if ((var_length= my_mbcharlen(cs, c)) == 1)
+        int var_length= my_charlen(cs, lip->get_ptr() - 1,
+                                       lip->get_end_of_query());
+        if (var_length == 1)
 	{
 	  if (c == quote_char)
 	  {
@@ -1618,11 +1621,9 @@ static int lex_one_token(YYSTYPE *yylval, THD *thd)
 	  }
 	}
 #ifdef USE_MB
-        else if (use_mb(cs))
+        else if (var_length > 1)
         {
-          if ((var_length= my_ismbchar(cs, lip->get_ptr() - 1,
-                                       lip->get_end_of_query())))
-            lip->skip_binary(var_length-1);
+          lip->skip_binary(var_length - 1);
         }
 #endif
       }
@@ -2080,6 +2081,10 @@ void st_select_lex_unit::init_query()
   found_rows_for_union= 0;
   insert_table_with_stored_vcol= 0;
   derived= 0;
+  is_view= false;
+  with_clause= 0;
+  with_element= 0;
+  columns_are_renamed= false;
 }
 
 void st_select_lex::init_query()
@@ -2110,8 +2115,7 @@ void st_select_lex::init_query()
   parent_lex->push_context(&context, parent_lex->thd->mem_root);
   cond_count= between_count= with_wild= 0;
   max_equal_elems= 0;
-  ref_pointer_array= 0;
-  ref_pointer_array_size= 0;
+  ref_pointer_array.reset();
   select_n_where_fields= 0;
   select_n_reserved= 0;
   select_n_having_items= 0;
@@ -2129,8 +2133,11 @@ void st_select_lex::init_query()
   prep_leaf_list_state= UNINIT;
   have_merged_subqueries= FALSE;
   bzero((char*) expr_cache_may_be_used, sizeof(expr_cache_may_be_used));
+  select_list_tables= 0;
   m_non_agg_field_used= false;
   m_agg_func_used= false;
+  window_specs.empty();
+  window_funcs.empty();
 }
 
 void st_select_lex::init_select()
@@ -2262,6 +2269,37 @@ void st_select_lex_node::fast_exclude()
   
 }
 
+
+/**
+  @brief
+    Insert a new chain of nodes into another chain before a particular link
+
+  @param in/out
+    ptr_pos_to_insert  the address of the chain pointer pointing to the link
+                       before which the subchain has to be inserted
+  @param   
+    end_chain_node     the last link of the subchain to be inserted
+
+  @details
+    The method inserts the chain of nodes starting from this node and ending
+    with the node nd_chain_node into another chain of nodes before the node
+    pointed to by *ptr_pos_to_insert.
+    It is assumed that ptr_pos_to_insert belongs to the chain where we insert.
+    So it must be updated.
+
+  @retval
+    The method returns the pointer to the first link of the inserted chain
+*/
+
+st_select_lex_node *st_select_lex_node:: insert_chain_before(
+				         st_select_lex_node **ptr_pos_to_insert,
+                                         st_select_lex_node *end_chain_node)
+{
+  end_chain_node->link_next= *ptr_pos_to_insert;
+  (*ptr_pos_to_insert)->link_prev= &end_chain_node->link_next;
+  this->link_prev= ptr_pos_to_insert;
+  return this;
+}
 
 /*
   Exclude a node from the tree lex structure, but leave it in the global
@@ -2626,7 +2664,7 @@ bool st_select_lex::setup_ref_array(THD *thd, uint order_group_num)
                        select_n_having_items +
                        select_n_where_fields +
                        order_group_num) * 5;
-  if (ref_pointer_array != NULL)
+  if (!ref_pointer_array.is_null())
   {
     /*
       We need to take 'n_sum_items' into account when allocating the array,
@@ -2635,23 +2673,32 @@ bool st_select_lex::setup_ref_array(THD *thd, uint order_group_num)
       In the usual case we can reuse the array from the prepare phase.
       If we need a bigger array, we must allocate a new one.
     */
-    if (ref_pointer_array_size >= n_elems)
-    {
-      DBUG_PRINT("info", ("reusing old ref_array"));
+    if (ref_pointer_array.size() == n_elems)
       return false;
-    }
-  }
-  ref_pointer_array= static_cast<Item**>(arena->alloc(sizeof(Item*) * n_elems));
-  if (ref_pointer_array != NULL)
-    ref_pointer_array_size= n_elems;
 
-  return ref_pointer_array == NULL;
+    /*
+      We need to take 'n_sum_items' into account when allocating the array,
+      and this may actually increase during the optimization phase due to
+      MIN/MAX rewrite in Item_in_subselect::single_value_transformer.
+      In the usual case we can reuse the array from the prepare phase.
+      If we need a bigger array, we must allocate a new one.
+     */
+    if (ref_pointer_array.size() == n_elems)
+      return false;
+   }
+  Item **array= static_cast<Item**>(arena->alloc(sizeof(Item*) * n_elems));
+  if (array != NULL)
+    ref_pointer_array= Ref_ptr_array(array, n_elems);
+
+  return array == NULL;
 }
 
 
 void st_select_lex_unit::print(String *str, enum_query_type query_type)
 {
   bool union_all= !union_distinct;
+  if (with_clause)
+    with_clause->print(str, query_type);
   for (SELECT_LEX *sl= first_select(); sl; sl= sl->next_select())
   {
     if (sl != first_select())
@@ -2708,8 +2755,8 @@ void st_select_lex::print_order(String *str,
       else
         (*order->item)->print(str, query_type);
     }
-    if (!order->asc)
-      str->append(STRING_WITH_LEN(" desc"));
+    if (order->direction == ORDER::ORDER_DESC)
+       str->append(STRING_WITH_LEN(" desc"));
     if (order->next)
       str->append(',');
   }
@@ -4151,9 +4198,11 @@ void SELECT_LEX::update_used_tables()
 
   Item *item;
   List_iterator_fast<Item> it(join->fields_list);
+  select_list_tables= 0;
   while ((item= it++))
   {
     item->update_used_tables();
+    select_list_tables|= item->used_tables();
   }
   Item_outer_ref *ref;
   List_iterator_fast<Item_outer_ref> ref_it(inner_refs_list);
@@ -4202,6 +4251,8 @@ void st_select_lex::update_correlated_cache()
 
   if (join->conds)
     is_correlated|= MY_TEST(join->conds->used_tables() & OUTER_REF_TABLE_BIT);
+
+  is_correlated|= join->having_is_correlated;
 
   if (join->having)
     is_correlated|= MY_TEST(join->having->used_tables() & OUTER_REF_TABLE_BIT);

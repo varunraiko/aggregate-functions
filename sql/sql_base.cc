@@ -49,6 +49,7 @@
 #include "transaction.h"
 #include "sql_prepare.h"
 #include "sql_statistics.h"
+#include "sql_cte.h"
 #include <m_ctype.h>
 #include <my_dir.h>
 #include <hash.h>
@@ -348,27 +349,11 @@ void intern_close_table(TABLE *table)
                         table->s ? table->s->table_name.str : "?",
                         (long) table));
 
-  free_io_cache(table);
   delete table->triggers;
   if (table->file)                              // Not true if placeholder
     (void) closefrm(table, 1);			// close file
   table->alias.free();
   my_free(table);
-  DBUG_VOID_RETURN;
-}
-
-
-/* Free resources allocated by filesort() and read_record() */
-
-void free_io_cache(TABLE *table)
-{
-  DBUG_ENTER("free_io_cache");
-  if (table->sort.io_cache)
-  {
-    close_cached_file(table->sort.io_cache);
-    my_free(table->sort.io_cache);
-    table->sort.io_cache=0;
-  }
   DBUG_VOID_RETURN;
 }
 
@@ -1217,7 +1202,8 @@ bool close_temporary_tables(THD *thd)
       */
       for (;
            table && is_user_table(table) &&
-             tmpkeyval(thd, table) == thd->variables.pseudo_thread_id &&
+             (ulong) tmpkeyval(thd, table) ==
+             (ulong) thd->variables.pseudo_thread_id &&
              table->s->db.length == db.length() &&
              memcmp(table->s->db.str, db.ptr(), db.length()) == 0;
            table= next)
@@ -1799,7 +1785,6 @@ void close_temporary(TABLE *table, bool free_share, bool delete_table)
   DBUG_PRINT("tmptable", ("closing table: '%s'.'%s'",
                           table->s->db.str, table->s->table_name.str));
 
-  free_io_cache(table);
   closefrm(table, 0);
   if (delete_table)
     rm_temporary_table(table_type, table->s->path.str);
@@ -2288,8 +2273,7 @@ bool open_table(THD *thd, TABLE_LIST *table_list, Open_table_context *ot_ctx)
           DBUG_RETURN(true);
         }
 
-        if (!tdc_open_view(thd, table_list, alias, key, key_length,
-                           CHECK_METADATA_VERSION))
+        if (!tdc_open_view(thd, table_list, CHECK_METADATA_VERSION))
         {
           DBUG_ASSERT(table_list->view != 0);
           DBUG_RETURN(FALSE); // VIEW
@@ -2407,10 +2391,7 @@ bool open_table(THD *thd, TABLE_LIST *table_list, Open_table_context *ot_ctx)
 
 retry_share:
 
-  share= tdc_acquire_share(thd, table_list->db, table_list->table_name,
-                           key, key_length,
-                           table_list->mdl_request.key.tc_hash_value(),
-                           gts_flags, &table);
+  share= tdc_acquire_share(thd, table_list, gts_flags, &table);
 
   if (!share)
   {
@@ -3265,9 +3246,6 @@ check_and_update_routine_version(THD *thd, Sroutine_hash_entry *rt,
 
    @param thd               Thread handle
    @param table_list        TABLE_LIST with db, table_name & belong_to_view
-   @param alias             Alias name
-   @param cache_key         Key for table definition cache
-   @param cache_key_length  Length of cache_key
    @param flags             Flags which modify how we open the view
 
    @todo This function is needed for special handling of views under
@@ -3276,16 +3254,13 @@ check_and_update_routine_version(THD *thd, Sroutine_hash_entry *rt,
    @return FALSE if success, TRUE - otherwise.
 */
 
-bool tdc_open_view(THD *thd, TABLE_LIST *table_list, const char *alias,
-                   const char *cache_key, uint cache_key_length,
-                   uint flags)
+bool tdc_open_view(THD *thd, TABLE_LIST *table_list, uint flags)
 {
   TABLE not_used;
   TABLE_SHARE *share;
   bool err= TRUE;
 
-  if (!(share= tdc_acquire_share(thd, table_list->db, table_list->table_name,
-                                 cache_key, cache_key_length, GTS_VIEW)))
+  if (!(share= tdc_acquire_share(thd, table_list, GTS_VIEW)))
     return TRUE;
 
   DBUG_ASSERT(share->is_view);
@@ -3372,7 +3347,7 @@ static bool auto_repair_table(THD *thd, TABLE_LIST *table_list)
   if (!(entry= (TABLE*)my_malloc(sizeof(TABLE), MYF(MY_WME))))
     return result;
 
-  if (!(share= tdc_acquire_share_shortlived(thd, table_list, GTS_TABLE)))
+  if (!(share= tdc_acquire_share(thd, table_list, GTS_TABLE)))
     goto end_free;
 
   DBUG_ASSERT(! share->is_view);
@@ -3591,8 +3566,7 @@ Open_table_context::recover_from_failed_open()
         if (open_if_exists)
           m_thd->push_internal_handler(&no_such_table_handler);
         
-        result= !tdc_acquire_share(m_thd, m_failed_table->db,
-                                   m_failed_table->table_name,
+        result= !tdc_acquire_share(m_thd, m_failed_table,
                                    GTS_TABLE | GTS_FORCE_DISCOVERY | GTS_NOLOCK);
         if (open_if_exists)
         {
@@ -3923,6 +3897,26 @@ open_and_process_table(THD *thd, LEX *lex, TABLE_LIST *tables,
     tables->db_length= tables->view_db.length;
     tables->table_name= tables->view_name.str;
     tables->table_name_length= tables->view_name.length;
+  }
+  else if (tables->select_lex) 
+  {
+    /*
+      Check whether 'tables' refers to a table defined in a with clause.
+      If so set the reference to the definition in tables->with.
+    */ 
+    if (!tables->with)
+      tables->with= tables->select_lex->find_table_def_in_with_clauses(tables);
+    /*
+      If 'tables' is defined in a with clause set the pointer to the
+      specification from its definition in tables->derived.
+    */
+    if (tables->with)
+    {
+      if (tables->set_as_with_table(thd, tables->with))
+        DBUG_RETURN(1);
+      else
+        goto end;
+    }
   }
   /*
     If this TABLE_LIST object is a placeholder for an information_schema
@@ -6095,9 +6089,9 @@ find_field_in_view(THD *thd, TABLE_LIST *table_list,
         }
         else
 	{
-          item->set_name((*ref)->name, (*ref)->name_length,
+          item->set_name(thd, (*ref)->name, (*ref)->name_length,
                          system_charset_info);
-          item->real_item()->set_name((*ref)->name, (*ref)->name_length,
+          item->real_item()->set_name(thd, (*ref)->name, (*ref)->name_length,
                                       system_charset_info);
         }
       }
@@ -6191,9 +6185,9 @@ find_field_in_natural_join(THD *thd, TABLE_LIST *table_ref, const char *name,
      */
     if (*ref && !(*ref)->is_autogenerated_name)
     {
-      item->set_name((*ref)->name, (*ref)->name_length,
+      item->set_name(thd, (*ref)->name, (*ref)->name_length,
                      system_charset_info);
-      item->real_item()->set_name((*ref)->name, (*ref)->name_length,
+      item->real_item()->set_name(thd, (*ref)->name, (*ref)->name_length,
                                   system_charset_info);
     }
     if (register_tree_change && arena)
@@ -6842,6 +6836,8 @@ find_field_in_tables(THD *thd, Item_ident *item,
                                  or as a field name without alias,
                                  or as a field hidden by alias,
                                  or ignoring alias)
+    limit                       How many items in the list to check
+                                (if limit==0 then all items are to be checked)
                                 
   RETURN VALUES
     0			Item is not found or item is not unique,
@@ -6859,9 +6855,10 @@ Item **not_found_item= (Item**) 0x1;
 Item **
 find_item_in_list(Item *find, List<Item> &items, uint *counter,
                   find_item_error_report_type report_error,
-                  enum_resolution_type *resolution)
+                  enum_resolution_type *resolution, uint limit)
 {
   List_iterator<Item> li(items);
+  uint n_items= limit == 0 ? items.elements : limit;
   Item **found=0, **found_unaliased= 0, *item;
   const char *db_name=0;
   const char *field_name=0;
@@ -6885,8 +6882,9 @@ find_item_in_list(Item *find, List<Item> &items, uint *counter,
     db_name=    ((Item_ident*) find)->db_name;
   }
 
-  for (uint i= 0; (item=li++); i++)
+  for (uint i= 0; i < n_items; i++)
   {
+    item= li++;
     if (field_name &&
         (item->real_item()->type() == Item::FIELD_ITEM ||
          ((item->type() == Item::REF_ITEM) &&
@@ -7767,11 +7765,13 @@ int setup_wild(THD *thd, TABLE_LIST *tables, List<Item> &fields,
 	       List<Item> *sum_func_list,
 	       uint wild_num)
 {
+  if (!wild_num)
+    return(0);
+
   Item *item;
   List_iterator<Item> it(fields);
   Query_arena *arena, backup;
   DBUG_ENTER("setup_wild");
-  DBUG_ASSERT(wild_num != 0);
 
   /*
     Don't use arena if we are not in prepared statements or stored procedures
@@ -7850,7 +7850,7 @@ int setup_wild(THD *thd, TABLE_LIST *tables, List<Item> &fields,
 ** Check that all given fields exists and fill struct with current data
 ****************************************************************************/
 
-bool setup_fields(THD *thd, Item **ref_pointer_array,
+bool setup_fields(THD *thd, Ref_ptr_array ref_pointer_array,
                   List<Item> &fields, enum_mark_columns mark_used_columns,
                   List<Item> *sum_func_list, bool allow_sum_func)
 {
@@ -7860,7 +7860,7 @@ bool setup_fields(THD *thd, Item **ref_pointer_array,
   List_iterator<Item> it(fields);
   bool save_is_item_list_lookup;
   DBUG_ENTER("setup_fields");
-  DBUG_PRINT("enter", ("ref_pointer_array: %p", ref_pointer_array));
+  DBUG_PRINT("enter", ("ref_pointer_array: %p", ref_pointer_array.array()));
 
   thd->mark_used_columns= mark_used_columns;
   DBUG_PRINT("info", ("thd->mark_used_columns: %d", thd->mark_used_columns));
@@ -7882,8 +7882,11 @@ bool setup_fields(THD *thd, Item **ref_pointer_array,
     TODO: remove it when (if) we made one list for allfields and
     ref_pointer_array
   */
-  if (ref_pointer_array)
-    bzero(ref_pointer_array, sizeof(Item *) * fields.elements);
+  if (!ref_pointer_array.is_null())
+  {
+    DBUG_ASSERT(ref_pointer_array.size() >= fields.elements);
+    memset(ref_pointer_array.array(), 0, sizeof(Item *) * fields.elements);
+  }
 
   /*
     We call set_entry() there (before fix_fields() of the whole list of field
@@ -7901,7 +7904,7 @@ bool setup_fields(THD *thd, Item **ref_pointer_array,
   while ((var= li++))
     var->set_entry(thd, FALSE);
 
-  Item **ref= ref_pointer_array;
+  Ref_ptr_array ref= ref_pointer_array;
   thd->lex->current_select->cur_pos_in_select_list= 0;
   while ((item= it++))
   {
@@ -7914,12 +7917,20 @@ bool setup_fields(THD *thd, Item **ref_pointer_array,
       DBUG_PRINT("info", ("thd->mark_used_columns: %d", thd->mark_used_columns));
       DBUG_RETURN(TRUE); /* purecov: inspected */
     }
-    if (ref)
-      *(ref++)= item;
-    if (item->with_sum_func && item->type() != Item::SUM_FUNC_ITEM &&
-	sum_func_list)
+    if (!ref.is_null())
+    {
+      ref[0]= item;
+      ref.pop_front();
+    }
+    /*
+      split_sum_func() must be called for Window Function items, see
+      Item_window_func::split_sum_func.
+    */
+    if ((item->with_sum_func && item->type() != Item::SUM_FUNC_ITEM &&
+	 sum_func_list) || item->with_window_func)
       item->split_sum_func(thd, ref_pointer_array, *sum_func_list,
                            SPLIT_SUM_SELECT);
+    thd->lex->current_select->select_list_tables|= item->used_tables();
     thd->lex->used_tables|= item->used_tables();
     thd->lex->current_select->cur_pos_in_select_list++;
   }
@@ -8338,7 +8349,10 @@ insert_fields(THD *thd, Name_resolution_context *context, const char *db_name,
       views and natural joins this update is performed inside the loop below.
     */
     if (table)
+    {
       thd->lex->used_tables|= table->map;
+      thd->lex->current_select->select_list_tables|= table->map;
+    }
 
     /*
       Initialize a generic field iterator for the current table reference.
@@ -8376,7 +8390,7 @@ insert_fields(THD *thd, Name_resolution_context *context, const char *db_name,
         temporary table. Thus in this case we can be sure that 'item' is an
         Item_field.
       */
-      if (any_privileges)
+      if (any_privileges && !tables->is_with_table() && !tables->is_derived())
       {
         DBUG_ASSERT((tables->field_translation == NULL && table) ||
                     tables->is_natural_join);
@@ -8430,6 +8444,8 @@ insert_fields(THD *thd, Name_resolution_context *context, const char *db_name,
           if (field_table)
           {
             thd->lex->used_tables|= field_table->map;
+            thd->lex->current_select->select_list_tables|=
+              field_table->map;
             field_table->covering_keys.intersect(field->part_of_key);
             field_table->merge_keys.merge(field->part_of_key);
             field_table->used_fields++;
@@ -8748,7 +8764,7 @@ fill_record(THD *thd, TABLE *table_arg, List<Item> &fields, List<Item> &values,
                           ER_THD(thd, ER_WARNING_NON_DEFAULT_VALUE_FOR_VIRTUAL_COLUMN),
                           rfield->field_name, table->s->table_name.str);
     }
-    if ((!rfield->vcol_info || rfield->stored_in_db) && 
+    if (rfield->stored_in_db() &&
         (value->save_in_field(rfield, 0)) < 0 && !ignore_errors)
     {
       my_message(ER_UNKNOWN_ERROR, ER_THD(thd, ER_UNKNOWN_ERROR), MYF(0));

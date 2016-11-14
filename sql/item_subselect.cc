@@ -58,6 +58,8 @@ Item_subselect::Item_subselect(THD *thd_arg):
 {
   DBUG_ENTER("Item_subselect::Item_subselect");
   DBUG_PRINT("enter", ("this: 0x%lx", (ulong) this));
+  sortbuffer.str= 0;
+
 #ifndef DBUG_OFF
   exec_counter= 0;
 #endif
@@ -152,6 +154,9 @@ void Item_subselect::cleanup()
   if (engine)
     engine->cleanup();
   reset();
+  filesort_buffer.free_sort_buffer();
+  my_free(sortbuffer.str);
+
   value_assigned= 0;
   expr_cache= 0;
   forced_const= FALSE;
@@ -769,7 +774,7 @@ int Item_in_subselect::optimize(double *out_rows, double *cost)
   }
   
   /* Now with grouping */
-  if (join->group_list)
+  if (join->group_list_for_estimates)
   {
     DBUG_PRINT("info",("Materialized join has grouping, trying to estimate it"));
     double output_rows= get_post_group_estimate(join, *out_rows);
@@ -1184,7 +1189,8 @@ void Item_singlerow_subselect::fix_length_and_dec()
   }
   else
   {
-    if (!(row= (Item_cache**) sql_alloc(sizeof(Item_cache*)*max_columns)))
+    if (!(row= (Item_cache**) current_thd->alloc(sizeof(Item_cache*) *
+                                                 max_columns)))
       return;
     engine->fix_length_and_dec(row);
     value= *row;
@@ -1925,7 +1931,8 @@ bool Item_allany_subselect::transform_into_max_min(JOIN *join)
         (ALL && (> || =>)) || (ANY && (< || =<))
         for ALL condition is inverted
       */
-      item= new (thd->mem_root) Item_sum_max(thd, *select_lex->ref_pointer_array);
+      item= new (thd->mem_root) Item_sum_max(thd,
+                                             select_lex->ref_pointer_array[0]);
     }
     else
     {
@@ -1933,11 +1940,12 @@ bool Item_allany_subselect::transform_into_max_min(JOIN *join)
         (ALL && (< || =<)) || (ANY && (> || =>))
         for ALL condition is inverted
       */
-      item= new (thd->mem_root) Item_sum_min(thd, *select_lex->ref_pointer_array);
+      item= new (thd->mem_root) Item_sum_min(thd,
+                                             select_lex->ref_pointer_array[0]);
     }
     if (upper_item)
       upper_item->set_sum_test(item);
-    thd->change_item_tree(select_lex->ref_pointer_array, item);
+    thd->change_item_tree(&select_lex->ref_pointer_array[0], item);
     {
       List_iterator<Item> it(select_lex->item_list);
       it++;
@@ -2083,8 +2091,8 @@ Item_in_subselect::create_single_in_to_exists_cond(JOIN *join,
                                                       thd,
                                                       &select_lex->context,
                                                       this,
-                                                      select_lex->
-                                                      ref_pointer_array,
+                                                      &select_lex->
+                                                      ref_pointer_array[0],  
                                                       (char *)"<ref>",
                                                       this->full_name()));
     if (!abort_on_null && left_expr->maybe_null)
@@ -2159,7 +2167,7 @@ Item_in_subselect::create_single_in_to_exists_cond(JOIN *join,
                        new (thd->mem_root) Item_ref_null_helper(thd,
                                                   &select_lex->context,
                                                   this,
-                                                  select_lex->ref_pointer_array,
+                                                  &select_lex->ref_pointer_array[0],
                                                   (char *)"<no matter>",
                                                   (char *)"<result>"));
         if (!abort_on_null && left_expr->maybe_null)
@@ -2346,7 +2354,7 @@ Item_in_subselect::create_row_in_to_exists_cond(JOIN * join,
                                      (char *)in_left_expr_name),
                      new (thd->mem_root)
                      Item_ref(thd, &select_lex->context,
-                              select_lex->ref_pointer_array + i,
+                              &select_lex->ref_pointer_array[i],
                               (char *)"<no matter>",
                               (char *)"<list ref>"));
       Item *item_isnull=
@@ -2354,7 +2362,7 @@ Item_in_subselect::create_row_in_to_exists_cond(JOIN * join,
         Item_func_isnull(thd,
                          new (thd->mem_root)
                          Item_ref(thd, &select_lex->context,
-                                  select_lex->ref_pointer_array+i,
+                                  &select_lex->ref_pointer_array[i],
                                   (char *)"<no matter>",
                                   (char *)"<list ref>"));
       Item *col_item= new (thd->mem_root)
@@ -2372,8 +2380,8 @@ Item_in_subselect::create_row_in_to_exists_cond(JOIN * join,
         Item_is_not_null_test(thd, this,
                               new (thd->mem_root)
                               Item_ref(thd, &select_lex->context,
-                                       select_lex->
-                                       ref_pointer_array + i,
+                                       &select_lex->
+                                       ref_pointer_array[i],
                                        (char *)"<no matter>",
                                        (char *)"<list ref>"));
       if (!abort_on_null && left_expr->element_index(i)->maybe_null)
@@ -2411,8 +2419,8 @@ Item_in_subselect::create_row_in_to_exists_cond(JOIN * join,
                                      (char *)in_left_expr_name),
                      new (thd->mem_root)
                      Item_direct_ref(thd, &select_lex->context,
-                                     select_lex->
-                                     ref_pointer_array+i,
+                                     &select_lex->
+                                     ref_pointer_array[i],
                                      (char *)"<no matter>",
                                      (char *)"<list ref>"));
       if (!abort_on_null && select_lex->ref_pointer_array[i]->maybe_null)
@@ -2422,7 +2430,7 @@ Item_in_subselect::create_row_in_to_exists_cond(JOIN * join,
           Item_is_not_null_test(thd, this,
                                 new (thd->mem_root)
                                 Item_ref(thd, &select_lex->context, 
-                                         select_lex->ref_pointer_array + i,
+                                         &select_lex->ref_pointer_array[i],
                                          (char *)"<no matter>",
                                          (char *)"<list ref>"));
         
@@ -2431,8 +2439,8 @@ Item_in_subselect::create_row_in_to_exists_cond(JOIN * join,
           Item_func_isnull(thd,
                            new (thd->mem_root)
                            Item_direct_ref(thd, &select_lex->context,
-                                           select_lex->
-                                           ref_pointer_array+i,
+                                           &select_lex->
+                                           ref_pointer_array[i],
                                            (char *)"<no matter>",
                                            (char *)"<list ref>"));
         item= new (thd->mem_root) Item_cond_or(thd, item, item_isnull);
@@ -3567,8 +3575,7 @@ int subselect_single_select_engine::prepare(THD *thd)
   prepared= 1;
   SELECT_LEX *save_select= thd->lex->current_select;
   thd->lex->current_select= select_lex;
-  if (join->prepare(&select_lex->ref_pointer_array,
-		    select_lex->table_list.first,
+  if (join->prepare(select_lex->table_list.first,
 		    select_lex->with_wild,
 		    select_lex->where,
 		    select_lex->order_list.elements +
@@ -3718,14 +3725,6 @@ int subselect_single_select_engine::exec()
         */
         select_lex->uncacheable|= UNCACHEABLE_EXPLAIN;
         select_lex->master_unit()->uncacheable|= UNCACHEABLE_EXPLAIN;
-        /*
-          Force join->join_tmp creation, because this subquery will be replaced
-          by a simple select from the materialization temp table by optimize()
-          called by EXPLAIN and we need to preserve the initial query structure
-          so we can display it.
-        */
-        if (join->need_tmp && join->init_save_join_tab())
-          DBUG_RETURN(1);                        /* purecov: inspected */
       }
     }
     if (item->engine_changed(this))
@@ -5268,7 +5267,7 @@ double get_post_group_estimate(JOIN* join, double join_op_rows)
   table_map tables_in_group_list= table_map(0);
 
   /* Find out which tables are used in GROUP BY list */
-  for (ORDER *order= join->group_list; order; order= order->next)
+  for (ORDER *order= join->group_list_for_estimates; order; order= order->next)
   {
     Item *item= order->item[0];
     table_map item_used_tables= item->used_tables();

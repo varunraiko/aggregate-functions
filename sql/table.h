@@ -48,6 +48,7 @@ class ACL_internal_schema_access;
 class ACL_internal_table_access;
 class Field;
 class Table_statistics;
+class With_element;
 class TDC_element;
 
 /*
@@ -212,8 +213,13 @@ typedef struct st_order {
   Field  *fast_field_copier_setup;
   int    counter;                       /* position in SELECT list, correct
                                            only if counter_used is true*/
-  bool	 asc;				/* true if ascending */
-  bool	 free_me;			/* true if item isn't shared  */
+  enum enum_order {
+    ORDER_NOT_RELEVANT,
+    ORDER_ASC,
+    ORDER_DESC
+  };
+
+  enum_order direction;                 /* Requested direction of ordering */
   bool	 in_field_list;			/* true if in select field list */
   bool   counter_used;                  /* parameter was counter of columns */
   Field  *field;			/* If tmp-table group */
@@ -320,55 +326,6 @@ enum enum_vcol_update_mode
   VCOL_UPDATE_FOR_WRITE,
   VCOL_UPDATE_ALL
 };
-
-class Filesort_info
-{
-  /// Buffer for sorting keys.
-  Filesort_buffer filesort_buffer;
-
-public:
-  IO_CACHE *io_cache;           /* If sorted through filesort */
-  uchar     *buffpek;           /* Buffer for buffpek structures */
-  uint      buffpek_len;        /* Max number of buffpeks in the buffer */
-  uchar     *addon_buf;         /* Pointer to a buffer if sorted with fields */
-  size_t    addon_length;       /* Length of the buffer */
-  struct st_sort_addon_field *addon_field;     /* Pointer to the fields info */
-  void    (*unpack)(struct st_sort_addon_field *, uchar *, uchar *); /* To unpack back */
-  uchar     *record_pointers;    /* If sorted in memory */
-  ha_rows   found_records;      /* How many records in sort */
-
-  /** Sort filesort_buffer */
-  void sort_buffer(Sort_param *param, uint count)
-  { filesort_buffer.sort_buffer(param, count); }
-
-  /**
-     Accessors for Filesort_buffer (which @c).
-  */
-  uchar *get_record_buffer(uint idx)
-  { return filesort_buffer.get_record_buffer(idx); }
-
-  uchar **get_sort_keys()
-  { return filesort_buffer.get_sort_keys(); }
-
-  uchar **alloc_sort_buffer(uint num_records, uint record_length)
-  { return filesort_buffer.alloc_sort_buffer(num_records, record_length); }
-
-  bool check_sort_buffer_properties(uint num_records, uint record_length)
-  {
-    return filesort_buffer.check_sort_buffer_properties(num_records,
-                                                        record_length);
-  }
-
-  void free_sort_buffer()
-  { filesort_buffer.free_sort_buffer(); }
-
-  void init_record_pointers()
-  { filesort_buffer.init_record_pointers(); }
-
-  size_t sort_buffer_size() const
-  { return filesort_buffer.sort_buffer_size(); }
-};
-
 
 class Field_blob;
 class Table_triggers_list;
@@ -489,9 +446,6 @@ typedef enum enum_table_category TABLE_CATEGORY;
 TABLE_CATEGORY get_table_category(const LEX_STRING *db,
                                   const LEX_STRING *name);
 
-
-struct TABLE_share;
-struct All_share_tables;
 
 typedef struct st_table_field_type
 {
@@ -1059,7 +1013,7 @@ private:
      One should use methods of I_P_List template instead.
   */
   TABLE *share_all_next, **share_all_prev;
-  friend struct All_share_tables;
+  friend class TDC_element;
 
 public:
 
@@ -1290,7 +1244,9 @@ public:
   bool alias_name_used;              /* true if table_name is alias */
   bool get_fields_in_item_tree;      /* Signal to fix_field */
   bool m_needs_reopen;
+private:
   bool created;    /* For tmp tables. TRUE <=> tmp table was actually created.*/
+public:
 #ifdef HAVE_REPLICATION
   /* used in RBR Triggers */
   bool master_had_triggers;
@@ -1305,7 +1261,6 @@ public:
    */
   Blob_mem_storage *blob_storage;
   GRANT_INFO grant;
-  Filesort_info sort;
   /*
     The arena which the items for expressions from the table definition
     are associated with.  
@@ -1403,30 +1358,46 @@ public:
     map= map_arg;
     tablenr= tablenr_arg;
   }
-  inline void enable_keyread()
+
+  void set_keyread(bool flag)
   {
-    DBUG_ENTER("enable_keyread");
-    DBUG_ASSERT(key_read == 0);
-    key_read= 1;
-    file->extra(HA_EXTRA_KEYREAD);
-    DBUG_VOID_RETURN;
+    DBUG_ASSERT(file);
+    if (flag && !key_read)
+    {
+      key_read= 1;
+      if (is_created())
+        file->extra(HA_EXTRA_KEYREAD);
+    }
+    else if (!flag && key_read)
+    {
+      key_read= 0;
+      if (is_created())
+        file->extra(HA_EXTRA_NO_KEYREAD);
+    }
   }
+
+  /// Return true if table is instantiated, and false otherwise.
+  bool is_created() const { return created; }
+
+  /**
+    Set the table as "created", and enable flags in storage engine
+    that could not be enabled without an instantiated table.
+  */
+  void set_created()
+  {
+    if (created)
+      return;
+    if (key_read)
+      file->extra(HA_EXTRA_KEYREAD);
+    created= true;
+  }
+
   /*
     Returns TRUE if the table is filled at execution phase (and so, the
     optimizer must not do anything that depends on the contents of the table,
     like range analysis or constant table detection)
   */
   bool is_filled_at_execution();
-  inline void disable_keyread()
-  {
-    DBUG_ENTER("disable_keyread");
-    if (key_read)
-    {
-      key_read= 0;
-      file->extra(HA_EXTRA_NO_KEYREAD);
-    }
-    DBUG_VOID_RETURN;
-  }
 
   bool update_const_key_parts(COND *conds);
 
@@ -1462,19 +1433,6 @@ struct TABLE_share
   static inline TABLE ***prev_ptr(TABLE *l)
   {
     return (TABLE ***) &l->prev;
-  }
-};
-
-
-struct All_share_tables
-{
-  static inline TABLE **next_ptr(TABLE *l)
-  {
-    return &l->share_all_next;
-  }
-  static inline TABLE ***prev_ptr(TABLE *l)
-  {
-    return &l->share_all_prev;
   }
 };
 
@@ -1897,6 +1855,7 @@ struct TABLE_LIST
      derived tables. Use TABLE_LIST::is_anonymous_derived_table().
   */
   st_select_lex_unit *derived;		/* SELECT_LEX_UNIT of derived table */
+  With_element *with;                   /* With element of with_table */
   ST_SCHEMA_TABLE *schema_table;        /* Information_schema table */
   st_select_lex	*schema_select_lex;
   /*
@@ -2114,6 +2073,11 @@ struct TABLE_LIST
   /* TRUE <=> this table is a const one and was optimized away. */
   bool optimized_away;
 
+  /**
+    TRUE <=> already materialized. Valid only for materialized derived
+    tables/views.
+  */
+  bool materialized;
   /* I_S: Flags to open_table (e.g. OPEN_TABLE_ONLY or OPEN_VIEW_ONLY) */
   uint i_s_requested_object;
 
@@ -2262,6 +2226,7 @@ struct TABLE_LIST
   {
     return (derived_type & DTYPE_TABLE);
   }
+  bool is_with_table();
   inline void set_view()
   {
     derived_type= DTYPE_VIEW;
@@ -2302,6 +2267,7 @@ struct TABLE_LIST
   {
     derived_type|= DTYPE_MULTITABLE;
   }
+  bool set_as_with_table(THD *thd, With_element *with_elem);
   void reset_const_table();
   bool handle_derived(LEX *lex, uint phases);
 

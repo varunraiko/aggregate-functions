@@ -151,8 +151,8 @@ public:
     sync_with_sum_func_and_with_field(list);
     list.empty();                                     // Fields are used
   }
-  void split_sum_func(THD *thd, Item **ref_pointer_array, List<Item> &fields,
-                      uint flags);
+  void split_sum_func(THD *thd, Ref_ptr_array ref_pointer_array,
+                      List<Item> &fields, uint flags);
   virtual void print(String *str, enum_query_type query_type);
   void print_op(String *str, enum_query_type query_type);
   void print_args(String *str, uint from, enum_query_type query_type);
@@ -173,8 +173,11 @@ public:
   }
   void signal_divide_by_null();
   friend class udf_handler;
-  Field *create_field_for_create_select(TABLE *table)
+
+  Field *create_field_for_create_select(THD *thd, TABLE *table)
+
   {
+    DBUG_ASSERT(thd == table->in_use);
     return result_type() != STRING_RESULT ?
            create_tmp_field(false, table, MY_INT32_NUM_DECIMAL_DIGITS) :
            tmp_table_field_from_field_type(table, false, false);
@@ -376,6 +379,7 @@ public:
   longlong val_int()
     { DBUG_ASSERT(fixed == 1); return (longlong) rint(val_real()); }
   enum Item_result result_type () const { return REAL_RESULT; }
+  enum_field_types field_type() const { return MYSQL_TYPE_DOUBLE; }
   void fix_length_and_dec()
   { decimals= NOT_FIXED_DEC; max_length= float_length(decimals); }
 };
@@ -448,8 +452,7 @@ class Item_func_hybrid_field_type: public Item_hybrid_func
     DBUG_ASSERT((res != NULL) ^ null_value);
     return res;
   }
-protected:
-  Item_result cached_result_type;
+
 public:
   Item_func_hybrid_field_type(THD *thd):
     Item_hybrid_func(thd)
@@ -596,6 +599,7 @@ public:
   double val_real();
   String *val_str(String*str);
   enum Item_result result_type () const { return INT_RESULT; }
+  enum_field_types field_type() const { return MYSQL_TYPE_LONGLONG; }
   void fix_length_and_dec() {}
 };
 
@@ -1109,6 +1113,7 @@ public:
   const char *func_name() const { return "rollup_const"; }
   bool const_item() const { return 0; }
   Item_result result_type() const { return args[0]->result_type(); }
+  enum_field_types field_type() const { return args[0]->field_type(); }
   void fix_length_and_dec()
   {
     collation= args[0]->collation;
@@ -1467,6 +1472,7 @@ class Item_func_udf_float :public Item_udf_func
   }
   double val_real();
   String *val_str(String *str);
+  enum_field_types field_type() const { return MYSQL_TYPE_DOUBLE; }
   void fix_length_and_dec() { fix_num_length_and_dec(); }
 };
 
@@ -1483,6 +1489,7 @@ public:
   double val_real() { return (double) Item_func_udf_int::val_int(); }
   String *val_str(String *str);
   enum Item_result result_type () const { return INT_RESULT; }
+  enum_field_types field_type() const { return MYSQL_TYPE_LONGLONG; }
   void fix_length_and_dec() { decimals= 0; max_length= 21; }
 };
 
@@ -1499,6 +1506,7 @@ public:
   my_decimal *val_decimal(my_decimal *);
   String *val_str(String *str);
   enum Item_result result_type () const { return DECIMAL_RESULT; }
+  enum_field_types field_type() const { return MYSQL_TYPE_NEWDECIMAL; }
   void fix_length_and_dec() { fix_num_length_and_dec(); }
 };
 
@@ -1536,6 +1544,7 @@ public:
     return dec_buf;
   }
   enum Item_result result_type () const { return STRING_RESULT; }
+  enum_field_types field_type() const { return string_field_type(); }
   void fix_length_and_dec();
 };
 
@@ -1747,7 +1756,7 @@ public:
   bool update_hash(void *ptr, uint length, enum Item_result type,
                    CHARSET_INFO *cs, bool unsigned_arg);
   bool send(Protocol *protocol, String *str_arg);
-  void make_field(Send_field *tmp_field);
+  void make_field(THD *thd, Send_field *tmp_field);
   bool check(bool use_result_field);
   void save_item_result(Item *item);
   bool update();
@@ -1833,7 +1842,7 @@ class Item_user_var_as_out_param :public Item
   user_var_entry *entry;
 public:
   Item_user_var_as_out_param(THD *thd, LEX_STRING a): Item(thd), name(a)
-  { set_name(a.str, 0, system_charset_info); }
+  { set_name(thd, a.str, 0, system_charset_info); }
   /* We should return something different from FIELD_ITEM here */
   enum Type type() const { return STRING_ITEM;}
   double val_real();
@@ -1845,6 +1854,7 @@ public:
   void print_for_load(THD *thd, String *str);
   void set_null_value(CHARSET_INFO* cs);
   void set_value(const char *str, uint length, CHARSET_INFO* cs);
+  enum_field_types field_type() const { return MYSQL_TYPE_DOUBLE; }
 };
 
 
@@ -2033,6 +2043,33 @@ enum Cast_target
 };
 
 
+struct Lex_cast_type_st: public Lex_length_and_dec_st
+{
+private:
+  Cast_target m_type;
+public:
+  void set(Cast_target type, const char *length, const char *dec)
+  {
+    m_type= type;
+    Lex_length_and_dec_st::set(length, dec);
+  }
+  void set(Cast_target type, Lex_length_and_dec_st length_and_dec)
+  {
+    m_type= type;
+    Lex_length_and_dec_st::operator=(length_and_dec);
+  }
+  void set(Cast_target type, const char *length)
+  {
+    set(type, length, 0);
+  }
+  void set(Cast_target type)
+  {
+    set(type, 0, 0);
+  }
+  Cast_target type() const { return m_type; }
+};
+
+
 class Item_func_row_count :public Item_int_func
 {
 public:
@@ -2097,13 +2134,16 @@ public:
 
   enum enum_field_types field_type() const;
 
-  Field *create_field_for_create_select(TABLE *table)
+
+  Field *create_field_for_create_select(THD *thd, TABLE *table)
   {
     return result_type() != STRING_RESULT ?
            sp_result_field :
            tmp_table_field_from_field_type(table, false, false);
   }
-  void make_field(Send_field *tmp_field);
+
+  void make_field(THD *thd, Send_field *tmp_field);
+
 
   Item_result result_type() const;
 

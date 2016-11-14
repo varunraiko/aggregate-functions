@@ -31893,10 +31893,7 @@ my_char_weight_addr(const MY_UCA_WEIGHT_LEVEL *level, uint wc)
     slen	First string length
     t		Second string
     tlen	Seconf string length
-    level	DUCETweight level
-    diff_if_only_endspace_difference
-		        Set to 1 if the strings should be regarded as different
-                        if they only difference in end space
+
   
   NOTES:
     Works exactly the same with my_strnncoll_uca(),
@@ -31931,22 +31928,17 @@ my_char_weight_addr(const MY_UCA_WEIGHT_LEVEL *level, uint wc)
     positive number - means the first string is bigger
 */
 
-static int my_strnncollsp_uca_onelevel(CHARSET_INFO *cs, 
-                                       my_uca_scanner_handler *scanner_handler,
-                                       const MY_UCA_WEIGHT_LEVEL *level,
-                                       const uchar *s, size_t slen,
-                                       const uchar *t, size_t tlen,
-                                       my_bool diff_if_only_endspace_difference)
+
+static int my_strnncollsp_uca(CHARSET_INFO *cs, 
+                              my_uca_scanner_handler *scanner_handler,
+                              const uchar *s, size_t slen,
+                              const uchar *t, size_t tlen)
 {
   my_uca_scanner sscanner, tscanner;
   int s_res, t_res;
   
-#ifndef VARCHAR_WITH_DIFF_ENDSPACE_ARE_DIFFERENT_FOR_UNIQUE
-  diff_if_only_endspace_difference= 0;
-#endif
-
-  scanner_handler->init(&sscanner, cs, level, s, slen);
-  scanner_handler->init(&tscanner, cs, level, t, tlen);
+  scanner_handler->init(&sscanner, cs, &cs->uca->level[0], s, slen);
+  scanner_handler->init(&tscanner, cs, &cs->uca->level[0], t, tlen);
   
   do
   {
@@ -31966,7 +31958,7 @@ static int my_strnncollsp_uca_onelevel(CHARSET_INFO *cs,
         return (s_res - t_res);
       s_res= scanner_handler->next(&sscanner);
     } while (s_res > 0);
-    return diff_if_only_endspace_difference ? 1 : 0;
+    return 0;
   }
     
   if (s_res < 0 && t_res > 0)
@@ -31981,7 +31973,7 @@ static int my_strnncollsp_uca_onelevel(CHARSET_INFO *cs,
         return (s_res - t_res);
       t_res= scanner_handler->next(&tscanner);
     } while (t_res > 0);
-    return diff_if_only_endspace_difference ? -1 : 0;
+    return 0;
   }
   
   return ( s_res - t_res );
@@ -34294,23 +34286,12 @@ static int my_strnncoll_any_uca_multilevel(CHARSET_INFO *cs,
 
 static int my_strnncollsp_any_uca(CHARSET_INFO *cs,
                                   const uchar *s, size_t slen,
-                                  const uchar *t, size_t tlen,
-                                  my_bool diff_if_only_endspace_difference)
+                                  const uchar *t, size_t tlen)
 {
-  return my_strnncollsp_uca(cs, &my_any_uca_scanner_handler,
-                            s, slen, t, tlen,
-                            diff_if_only_endspace_difference);
-}
 
-static int my_strnncollsp_any_uca_multilevel(CHARSET_INFO *cs,
-                                      const uchar *s, size_t slen,
-                                      const uchar *t, size_t tlen,
-                                      my_bool diff_if_only_endspace_difference)
-{
-  return my_strnncollsp_uca_multilevel(cs, &my_any_uca_scanner_handler,
-                                       s, slen, t, tlen,
-                                       diff_if_only_endspace_difference);
-}
+  return my_strnncollsp_uca(cs, &my_any_uca_scanner_handler, s, slen, t, tlen);
+}   
+
 
 static void my_hash_sort_any_uca(CHARSET_INFO *cs,
                                  const uchar *s, size_t slen,
@@ -34380,12 +34361,9 @@ static int my_strnncoll_ucs2_uca(CHARSET_INFO *cs,
 
 static int my_strnncollsp_ucs2_uca(CHARSET_INFO *cs,
                                    const uchar *s, size_t slen,
-                                   const uchar *t, size_t tlen,
-                                   my_bool diff_if_only_endspace_difference)
+                                   const uchar *t, size_t tlen)
 {
-  return my_strnncollsp_uca(cs, &my_any_uca_scanner_handler,
-                            s, slen, t, tlen,
-                            diff_if_only_endspace_difference);
+  return my_strnncollsp_uca(cs, &my_any_uca_scanner_handler, s, slen, t, tlen);
 }   
 
 static void my_hash_sort_ucs2_uca(CHARSET_INFO *cs,

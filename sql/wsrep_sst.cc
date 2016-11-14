@@ -956,7 +956,7 @@ static int run_sql_command(THD *thd, const char *query)
     return -1;
   }
 
-  mysql_parse(thd, thd->query(), thd->query_length(), &ps);
+  mysql_parse(thd, thd->query(), thd->query_length(), &ps, FALSE);
   if (thd->is_error())
   {
     int const err= thd->get_stmt_da()->sql_errno();
@@ -1275,7 +1275,7 @@ wsrep_cb_status_t wsrep_sst_donate_cb (void* app_ctx, void* recv_ctx,
   /* This will be reset when sync callback is called.
    * Should we set wsrep_ready to FALSE here too? */
 
-  wsrep_config_state.set(WSREP_MEMBER_DONOR);
+  wsrep_config_state->set(WSREP_MEMBER_DONOR);
 
   const char* method = (char*)msg;
   size_t method_len  = strlen (method);

@@ -325,7 +325,6 @@
 /* BINLOG_DUMP options */
 
 #define BINLOG_DUMP_NON_BLOCK   1
-
 #define BINLOG_SEND_ANNOTATE_ROWS_EVENT   2
 
 #ifndef MYSQL_CLIENT
@@ -345,6 +344,7 @@ enum enum_parsing_place
   IN_WHERE,
   IN_ON,
   IN_GROUP_BY,
+  IN_ORDER_BY,
   PARSING_PLACE_SIZE /* always should be the last */
 };
 

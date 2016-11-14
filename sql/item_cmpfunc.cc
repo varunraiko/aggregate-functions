@@ -1853,8 +1853,8 @@ void Item_func_interval::fix_length_and_dec()
     }
 
     if (not_null_consts &&
-        (intervals=
-          (interval_range*) sql_alloc(sizeof(interval_range) * (rows - 1))))
+        (intervals= (interval_range*) current_thd->alloc(sizeof(interval_range) *
+                                                         (rows - 1))))
     {
       if (use_decimal_comparison)
       {
@@ -2486,7 +2486,7 @@ bool Item_func_if::date_op(MYSQL_TIME *ltime, uint fuzzydate)
 }
 
 
-void Item_func_nullif::split_sum_func(THD *thd, Item **ref_pointer_array,
+void Item_func_nullif::split_sum_func(THD *thd, Ref_ptr_array ref_pointer_array,
                                       List<Item> &fields, uint flags)
 {
   if (m_cache)
@@ -3626,8 +3626,9 @@ bool in_vector::find(Item *item)
   return ((*compare)(collation, base+start*size, result) == 0);
 }
 
-in_string::in_string(uint elements,qsort2_cmp cmp_func, CHARSET_INFO *cs)
-  :in_vector(elements, sizeof(String), cmp_func, cs),
+in_string::in_string(THD *thd, uint elements, qsort2_cmp cmp_func,
+                     CHARSET_INFO *cs)
+  :in_vector(thd, elements, sizeof(String), cmp_func, cs),
    tmp(buff, sizeof(buff), &my_charset_bin)
 {}
 
@@ -3635,7 +3636,7 @@ in_string::~in_string()
 {
   if (base)
   {
-    // base was allocated with help of sql_alloc => following is OK
+    // base was allocated on THD::mem_root => following is OK
     for (uint i=0 ; i < count ; i++)
       ((String*) base)[i].free();
   }
@@ -3710,8 +3711,9 @@ void in_row::set(uint pos, Item *item)
   DBUG_VOID_RETURN;
 }
 
-in_longlong::in_longlong(uint elements)
-  :in_vector(elements,sizeof(packed_longlong),(qsort2_cmp) cmp_longlong, 0)
+in_longlong::in_longlong(THD *thd, uint elements)
+  :in_vector(thd, elements, sizeof(packed_longlong),
+             (qsort2_cmp) cmp_longlong, 0)
 {}
 
 void in_longlong::set(uint pos,Item *item)
@@ -3768,8 +3770,8 @@ Item *in_datetime::create_item(THD *thd)
 }
 
 
-in_double::in_double(uint elements)
-  :in_vector(elements,sizeof(double),(qsort2_cmp) cmp_double, 0)
+in_double::in_double(THD *thd, uint elements)
+  :in_vector(thd, elements, sizeof(double), (qsort2_cmp) cmp_double, 0)
 {}
 
 void in_double::set(uint pos,Item *item)
@@ -3791,8 +3793,8 @@ Item *in_double::create_item(THD *thd)
 }
 
 
-in_decimal::in_decimal(uint elements)
-  :in_vector(elements, sizeof(my_decimal),(qsort2_cmp) cmp_decimal, 0)
+in_decimal::in_decimal(THD *thd, uint elements)
+  :in_vector(thd, elements, sizeof(my_decimal), (qsort2_cmp) cmp_decimal, 0)
 {}
 
 
@@ -4136,7 +4138,7 @@ static int srtcmp_in(CHARSET_INFO *cs, const String *x,const String *y)
 {
   return cs->coll->strnncollsp(cs,
                                (uchar *) x->ptr(),x->length(),
-                               (uchar *) y->ptr(),y->length(), 0);
+                               (uchar *) y->ptr(),y->length());
 }
 
 void Item_func_in::fix_length_and_dec()
@@ -4268,14 +4270,15 @@ void Item_func_in::fix_length_and_dec()
     }
     switch (m_compare_type) {
     case STRING_RESULT:
-      array=new (thd->mem_root) in_string(arg_count-1,(qsort2_cmp) srtcmp_in, 
+      array=new (thd->mem_root) in_string(thd, arg_count - 1,
+                                          (qsort2_cmp) srtcmp_in,
                                           cmp_collation.collation);
       break;
     case INT_RESULT:
-      array= new (thd->mem_root) in_longlong(arg_count-1);
+      array= new (thd->mem_root) in_longlong(thd, arg_count - 1);
       break;
     case REAL_RESULT:
-      array= new (thd->mem_root) in_double(arg_count-1);
+      array= new (thd->mem_root) in_double(thd, arg_count - 1);
       break;
     case ROW_RESULT:
       /*
@@ -4286,11 +4289,11 @@ void Item_func_in::fix_length_and_dec()
       ((in_row*)array)->tmp.store_value(args[0]);
       break;
     case DECIMAL_RESULT:
-      array= new (thd->mem_root) in_decimal(arg_count - 1);
+      array= new (thd->mem_root) in_decimal(thd, arg_count - 1);
       break;
     case TIME_RESULT:
       date_arg= find_date_time_item(args, arg_count, 0);
-      array= new (thd->mem_root) in_datetime(date_arg, arg_count - 1);
+      array= new (thd->mem_root) in_datetime(thd, date_arg, arg_count - 1);
       break;
     }
     if (!array || thd->is_fatal_error)		// OOM
@@ -4853,7 +4856,7 @@ void Item_cond::traverse_cond(Cond_traverser traverser,
     that have or refer (HAVING) to a SUM expression.
 */
 
-void Item_cond::split_sum_func(THD *thd, Item **ref_pointer_array,
+void Item_cond::split_sum_func(THD *thd, Ref_ptr_array ref_pointer_array,
                                List<Item> &fields, uint flags)
 {
   List_iterator<Item> li(list);
@@ -6782,10 +6785,9 @@ longlong Item_func_dyncol_exists::val_int()
     }
     else
     {
-      uint strlen;
+      uint strlen= nm->length() * my_charset_utf8_general_ci.mbmaxlen + 1;
       uint dummy_errors;
-      buf.str= (char *)sql_alloc((strlen= nm->length() *
-                                     my_charset_utf8_general_ci.mbmaxlen + 1));
+      buf.str= (char *) current_thd->alloc(strlen);
       if (buf.str)
       {
         buf.length=

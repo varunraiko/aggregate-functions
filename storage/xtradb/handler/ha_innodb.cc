@@ -7139,7 +7139,7 @@ innobase_mysql_cmp(
 		having indexes on such data need to rebuild their tables! */
 
 		ret = charset->coll->strnncollsp(
-			charset, a, a_length, b, b_length, 0);
+			charset, a, a_length, b, b_length);
 
 		if (ret < 0) {
 			return(-1);
@@ -7233,7 +7233,7 @@ innobase_mysql_cmp_prefix(
 	charset = innobase_get_fts_charset(mysql_type, charset_number);
 
 	result = ha_compare_text(charset, (uchar*) a, a_length,
-				 (uchar*) b, b_length, 1, 0);
+				 (uchar*) b, b_length, 1);
 
 	return(result);
 }
@@ -7253,7 +7253,7 @@ innobase_fts_text_cmp(
 
 	return(ha_compare_text(
 		charset, s1->f_str, static_cast<uint>(s1->f_len),
-		s2->f_str, static_cast<uint>(s2->f_len), 0, 0));
+		s2->f_str, static_cast<uint>(s2->f_len), 0));
 }
 /******************************************************************//**
 compare two character string case insensitively according to their charset. */
@@ -7276,7 +7276,7 @@ innobase_fts_text_case_cmp(
 
 	return(ha_compare_text(
 		charset, s1->f_str, static_cast<uint>(s1->f_len),
-		s2->f_str, static_cast<uint>(newlen), 0, 0));
+		s2->f_str, static_cast<uint>(newlen), 0));
 }
 /******************************************************************//**
 Get the first character's code position for FTS index partition. */
@@ -7324,7 +7324,7 @@ innobase_fts_text_cmp_prefix(
 
 	result = ha_compare_text(
 		charset, s2->f_str, static_cast<uint>(s2->f_len),
-		s1->f_str, static_cast<uint>(s1->f_len), 1, 0);
+		s1->f_str, static_cast<uint>(s1->f_len), 1);
 
 	/* We switched s1, s2 position in ha_compare_text. So we need
 	to negate the result */
@@ -8451,7 +8451,7 @@ ha_innobase::build_template(
 		/* Push down an index condition or an end_range check. */
 		for (i = 0, sql_idx = 0; i < n_stored_fields; i++, sql_idx++) {
 
-			while (!table->field[sql_idx]->stored_in_db) {
+			while (!table->field[sql_idx]->stored_in_db()) {
 				sql_idx++;
 			}
 
@@ -8570,7 +8570,7 @@ ha_innobase::build_template(
 		pushdown. */
 		for (i = 0, sql_idx = 0; i < n_stored_fields; i++, sql_idx++) {
 
-			while (!table->field[sql_idx]->stored_in_db) {
+			while (!table->field[sql_idx]->stored_in_db()) {
 				sql_idx++;
 			}
 
@@ -8610,7 +8610,7 @@ ha_innobase::build_template(
                 for (i = 0, sql_idx = 0; i < n_stored_fields; i++, sql_idx++) {
 			const Field*	field;
 
-			while (!table->field[sql_idx]->stored_in_db) {
+			while (!table->field[sql_idx]->stored_in_db()) {
 				sql_idx++;
 			}
 
@@ -9224,7 +9224,7 @@ calc_row_difference(
 
 	for (sql_idx = 0; sql_idx < n_fields; sql_idx++) {
 		field = table->field[sql_idx];
-		if (!field->stored_in_db)
+		if (!field->stored_in_db())
 		  continue;
 
 		o_ptr = (const byte*) old_row + get_field_offset(table, field);
@@ -9375,7 +9375,7 @@ calc_row_difference(
 				}
 			}
 		}
-		if (field->stored_in_db)
+		if (field->stored_in_db())
 			innodb_idx++;
 	}
 
@@ -11654,7 +11654,7 @@ create_table_def(
 
 	for (i = 0; i < n_cols; i++) {
 		Field*	field = form->field[i];
-		if (!field->stored_in_db)
+		if (!field->stored_in_db())
 			continue;
 
 		col_type = get_innobase_type_from_mysql_type(&unsigned_type,

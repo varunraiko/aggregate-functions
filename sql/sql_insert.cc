@@ -258,7 +258,7 @@ static int check_insert_fields(THD *thd, TABLE_LIST *table_list,
     if (table_list->is_view())
       unfix_fields(fields);
 
-    res= setup_fields(thd, 0, fields, MARK_COLUMNS_WRITE, 0, 0);
+    res= setup_fields(thd, Ref_ptr_array(), fields, MARK_COLUMNS_WRITE, 0, 0);
 
     /* Restore the current context. */
     ctx_state.restore_state(context, table_list);
@@ -346,7 +346,8 @@ static int check_update_fields(THD *thd, TABLE_LIST *insert_table_list,
   }
 
   /* Check the fields we are going to modify */
-  if (setup_fields(thd, 0, update_fields, MARK_COLUMNS_WRITE, 0, 0))
+  if (setup_fields(thd, Ref_ptr_array(),
+                   update_fields, MARK_COLUMNS_WRITE, 0, 0))
     return -1;
 
   if (insert_table_list->is_view() &&
@@ -771,7 +772,7 @@ bool mysql_insert(THD *thd,TABLE_LIST *table_list,
       my_error(ER_WRONG_VALUE_COUNT_ON_ROW, MYF(0), counter);
       goto abort;
     }
-    if (setup_fields(thd, 0, *values, MARK_COLUMNS_READ, 0, 0))
+    if (setup_fields(thd, Ref_ptr_array(), *values, MARK_COLUMNS_READ, 0, 0))
       goto abort;
     switch_to_nullable_trigger_fields(*values, table);
   }
@@ -1466,7 +1467,8 @@ bool mysql_prepare_insert(THD *thd, TABLE_LIST *table_list,
     table_list->next_local= 0;
     context->resolve_in_table_list_only(table_list);
 
-    res= (setup_fields(thd, 0, *values, MARK_COLUMNS_READ, 0, 0) ||
+    res= (setup_fields(thd, Ref_ptr_array(),
+                       *values, MARK_COLUMNS_READ, 0, 0) ||
           check_insert_fields(thd, context->table_list, fields, *values,
                               !insert_into_view, 0, &map));
 
@@ -1482,7 +1484,8 @@ bool mysql_prepare_insert(THD *thd, TABLE_LIST *table_list,
     }
 
     if (!res)
-      res= setup_fields(thd, 0, update_values, MARK_COLUMNS_READ, 0, 0);
+      res= setup_fields(thd, Ref_ptr_array(),
+                        update_values, MARK_COLUMNS_READ, 0, 0);
 
     if (!res && duplic == DUP_UPDATE)
     {
@@ -1506,7 +1509,7 @@ bool mysql_prepare_insert(THD *thd, TABLE_LIST *table_list,
   {
     for (Field **vfield_ptr= table->vfield; *vfield_ptr; vfield_ptr++)
     {
-      if ((*vfield_ptr)->stored_in_db)
+      if ((*vfield_ptr)->vcol_info->stored_in_db)
       {
         thd->lex->unit.insert_table_with_stored_vcol= table;
         break;
@@ -2070,6 +2073,7 @@ public:
     delayed_lock= global_system_variables.low_priority_updates ?
                                           TL_WRITE_LOW_PRIORITY : TL_WRITE;
     mysql_mutex_unlock(&LOCK_thread_count);
+    thread_safe_increment32(&thread_count);
     DBUG_VOID_RETURN;
   }
   ~Delayed_insert()
@@ -2083,17 +2087,24 @@ public:
       close_thread_tables(&thd);
       thd.mdl_context.release_transactional_locks();
     }
-    mysql_mutex_lock(&LOCK_thread_count);
     mysql_mutex_destroy(&mutex);
     mysql_cond_destroy(&cond);
     mysql_cond_destroy(&cond_client);
+
+    /*
+      We could use unlink_not_visible_threads() here, but as
+      delayed_insert_threads also needs to be protected by
+      the LOCK_thread_count mutex, we open code this.
+    */
+    mysql_mutex_lock(&LOCK_thread_count);
     thd.unlink();				// Must be unlinked under lock
-    my_free(thd.query());
-    thd.security_ctx->user= thd.security_ctx->host=0;
     delayed_insert_threads--;
     mysql_mutex_unlock(&LOCK_thread_count);
-    thread_safe_decrement32(&thread_count);
-    mysql_cond_broadcast(&COND_thread_count); /* Tell main we are ready */
+
+    my_free(thd.query());
+    thd.security_ctx->user= 0;
+    thd.security_ctx->host= 0;
+    dec_thread_count();
   }
 
   /* The following is for checking when we can delete ourselves */
@@ -2227,8 +2238,6 @@ bool delayed_get_table(THD *thd, MDL_request *grl_protection_request,
     {
       if (!(di= new Delayed_insert(thd->lex->current_select)))
         goto end_create;
-
-      thread_safe_increment32(&thread_count);
 
       /*
         Annotating delayed inserts is not supported.
@@ -2814,15 +2823,13 @@ pthread_handler_t handle_delayed_insert(void *arg)
 
   pthread_detach_this_thread();
   /* Add thread to THD list so that's it's visible in 'show processlist' */
-  mysql_mutex_lock(&LOCK_thread_count);
-  thd->thread_id= thd->variables.pseudo_thread_id= thread_id++;
+  thd->thread_id= thd->variables.pseudo_thread_id= next_thread_id();
   thd->set_current_time();
-  threads.append(thd);
+  add_to_active_threads(thd);
   if (abort_loop)
     thd->killed= KILL_CONNECTION;
   else
     thd->reset_killed();
-  mysql_mutex_unlock(&LOCK_thread_count);
 
   mysql_thread_set_psi_id(thd->thread_id);
 
@@ -3471,7 +3478,7 @@ select_insert::prepare(List<Item> &values, SELECT_LEX_UNIT *u)
   */
   lex->current_select= &lex->select_lex;
 
-  res= (setup_fields(thd, 0, values, MARK_COLUMNS_READ, 0, 0) ||
+  res= (setup_fields(thd, Ref_ptr_array(), values, MARK_COLUMNS_READ, 0, 0) ||
         check_insert_fields(thd, table_list, *fields, values,
                             !insert_into_view, 1, &map));
 
@@ -3524,7 +3531,7 @@ select_insert::prepare(List<Item> &values, SELECT_LEX_UNIT *u)
       table_list->next_name_resolution_table= 
         ctx_state.get_first_name_resolution_table();
 
-    res= res || setup_fields(thd, 0, *info.update_values,
+    res= res || setup_fields(thd, Ref_ptr_array(), *info.update_values,
                              MARK_COLUMNS_READ, 0, 0);
     if (!res)
     {
@@ -3653,7 +3660,7 @@ void select_insert::cleanup()
 select_insert::~select_insert()
 {
   DBUG_ENTER("~select_insert");
-  if (table && table->created)
+  if (table && table->is_created())
   {
     table->next_number_field=0;
     table->auto_increment_field_not_null= FALSE;
@@ -3926,8 +3933,9 @@ void select_insert::abort_result_set() {
 
 Field *Item::create_field_for_create_select(TABLE *table)
 {
+ 
   Field *def_field, *tmp_field;
-  return ::create_tmp_field(table->in_use, table, this, type(),
+  return ::create_tmp_field(thd, table, this, type(),
                             (Item ***) 0, &tmp_field, &def_field, 0, 0, 0, 0);
 }
 
@@ -4376,8 +4384,9 @@ bool select_create::send_eof()
       mysql_mutex_lock(&thd->LOCK_wsrep_thd);
       if (thd->wsrep_conflict_state != NO_CONFLICT)
       {
-        WSREP_DEBUG("select_create commit failed, thd: %lu err: %d %s",
-                    thd->thread_id, thd->wsrep_conflict_state, thd->query());
+        WSREP_DEBUG("select_create commit failed, thd: %lld  err: %d %s",
+                    (longlong) thd->thread_id, thd->wsrep_conflict_state,
+                    thd->query());
         mysql_mutex_unlock(&thd->LOCK_wsrep_thd);
         abort_result_set();
         DBUG_RETURN(true);

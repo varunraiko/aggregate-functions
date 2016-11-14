@@ -172,7 +172,7 @@ void make_leaves_list(THD *thd, List<TABLE_LIST> &list, TABLE_LIST *tables,
                       bool full_table_list, TABLE_LIST *boundary);
 int setup_wild(THD *thd, TABLE_LIST *tables, List<Item> &fields,
 	       List<Item> *sum_func_list, uint wild_num);
-bool setup_fields(THD *thd, Item** ref_pointer_array,
+bool setup_fields(THD *thd, Ref_ptr_array ref_pointer_array,
                   List<Item> &item, enum_mark_columns mark_used_columns,
                   List<Item> *sum_func_list, bool allow_sum_func);
 void unfix_fields(List<Item> &items);
@@ -201,7 +201,7 @@ Field *
 find_field_in_table_sef(TABLE *table, const char *name);
 Item ** find_item_in_list(Item *item, List<Item> &items, uint *counter,
                           find_item_error_report_type report_error,
-                          enum_resolution_type *resolution);
+                          enum_resolution_type *resolution, uint limit= 0);
 bool setup_tables(THD *thd, Name_resolution_context *context,
                   List<TABLE_LIST> *from_clause, TABLE_LIST *tables,
                   List<TABLE_LIST> &leaves, bool select_insert,
@@ -271,7 +271,6 @@ bool open_normal_and_derived_tables(THD *thd, TABLE_LIST *tables, uint flags,
                                     uint dt_phases);
 bool lock_tables(THD *thd, TABLE_LIST *tables, uint counter, uint flags);
 int decide_logging_format(THD *thd, TABLE_LIST *tables);
-void free_io_cache(TABLE *entry);
 void intern_close_table(TABLE *entry);
 void kill_delayed_threads_for_table(TDC_element *element);
 void close_thread_table(THD *thd, TABLE **table_ptr);
@@ -309,16 +308,7 @@ void close_all_tables_for_name(THD *thd, TABLE_SHARE *share,
                                ha_extra_function extra,
                                TABLE *skip_table);
 OPEN_TABLE_LIST *list_open_tables(THD *thd, const char *db, const char *wild);
-bool tdc_open_view(THD *thd, TABLE_LIST *table_list, const char *alias,
-                   const char *cache_key, uint cache_key_length, uint flags);
-
-static inline bool tdc_open_view(THD *thd, TABLE_LIST *table_list,
-                                 const char *alias, uint flags)
-{
-  const char *key;
-  uint key_length= get_table_def_key(table_list, &key);
-  return tdc_open_view(thd, table_list, alias, key, key_length, flags);
-}
+bool tdc_open_view(THD *thd, TABLE_LIST *table_list, uint flags);
 
 TABLE *find_table_for_mdl_upgrade(THD *thd, const char *db,
                                   const char *table_name,
@@ -396,7 +386,7 @@ inline TABLE_LIST *find_table_in_local_list(TABLE_LIST *table,
 }
 
 
-inline bool setup_fields_with_no_wrap(THD *thd, Item **ref_pointer_array,
+inline bool setup_fields_with_no_wrap(THD *thd, Ref_ptr_array ref_pointer_array,
                                       List<Item> &item,
                                       enum_mark_columns mark_used_columns,
                                       List<Item> *sum_func_list,

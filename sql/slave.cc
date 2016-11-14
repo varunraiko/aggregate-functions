@@ -303,10 +303,8 @@ handle_slave_background(void *arg __attribute__((unused)))
   my_thread_init();
   thd= new THD;
   thd->thread_stack= (char*) &thd;           /* Set approximate stack start */
-  mysql_mutex_lock(&LOCK_thread_count);
-  thd->thread_id= thread_id++;
-  mysql_mutex_unlock(&LOCK_thread_count);
-  thd->system_thread = SYSTEM_THREAD_SLAVE_BACKGROUND;
+  thd->thread_id= next_thread_id();
+  thd->system_thread = SYSTEM_THREAD_SLAVE_INIT;
   thread_safe_increment32(&service_thread_count);
   thd->store_globals();
   thd->security_ctx->skip_grants();
@@ -320,58 +318,17 @@ handle_slave_background(void *arg __attribute__((unused)))
                       thd->get_stmt_da()->sql_errno(),
                       thd->get_stmt_da()->message());
 
-  mysql_mutex_lock(&LOCK_slave_background);
-  slave_background_thread_gtid_loaded= true;
-  mysql_cond_broadcast(&COND_slave_background);
-
-  THD_STAGE_INFO(thd, stage_slave_background_process_request);
-  do
-  {
-    slave_background_kill_t *kill_list;
-
-    thd->ENTER_COND(&COND_slave_background, &LOCK_slave_background,
-                    &stage_slave_background_wait_request,
-                    &old_stage);
-    for (;;)
-    {
-      stop= abort_loop || thd->killed || slave_background_thread_stop;
-      kill_list= slave_background_kill_list;
-      if (stop || kill_list)
-        break;
-      mysql_cond_wait(&COND_slave_background, &LOCK_slave_background);
-    }
-
-    slave_background_kill_list= NULL;
-    thd->EXIT_COND(&old_stage);
-
-    while (kill_list)
-    {
-      slave_background_kill_t *p = kill_list;
-      THD *to_kill= p->to_kill;
-      kill_list= p->next;
-
-      mysql_mutex_lock(&to_kill->LOCK_thd_data);
-      to_kill->awake(KILL_CONNECTION);
-      mysql_mutex_unlock(&to_kill->LOCK_thd_data);
-      mysql_mutex_lock(&to_kill->LOCK_wakeup_ready);
-      to_kill->rgi_slave->killed_for_retry=
-        rpl_group_info::RETRY_KILL_KILLED;
-      mysql_cond_broadcast(&to_kill->COND_wakeup_ready);
-      mysql_mutex_unlock(&to_kill->LOCK_wakeup_ready);
-      my_free(p);
-    }
-    mysql_mutex_lock(&LOCK_slave_background);
-  } while (!stop);
-
-  slave_background_thread_running= false;
-  mysql_cond_broadcast(&COND_slave_background);
-  mysql_mutex_unlock(&LOCK_slave_background);
-
   delete thd;
   thread_safe_decrement32(&service_thread_count);
-  signal_thd_deleted();
-  my_thread_end();
 
+  /* Signal run_slave_init_thread() that we are done */
+
+  mysql_mutex_lock(&LOCK_start_thread);
+  slave_init_thread_running= false;
+  mysql_cond_broadcast(&COND_start_thread);
+  mysql_mutex_unlock(&LOCK_start_thread);
+
+  my_thread_end();
   return 0;
 }
 
@@ -429,11 +386,11 @@ start_slave_background_thread()
     return 1;
   }
 
-  mysql_mutex_lock(&LOCK_slave_background);
-  while (!slave_background_thread_gtid_loaded)
-    mysql_cond_wait(&COND_slave_background, &LOCK_slave_background);
-  mysql_mutex_unlock(&LOCK_slave_background);
 
+  mysql_mutex_lock(&LOCK_start_thread);
+  while (slave_init_thread_running)
+    mysql_cond_wait(&COND_start_thread, &LOCK_start_thread);
+  mysql_mutex_unlock(&LOCK_start_thread);
   return 0;
 }
 
@@ -3178,9 +3135,7 @@ static int init_slave_thread(THD* thd, Master_info *mi,
   thd->variables.log_slow_filter= global_system_variables.log_slow_filter;
   set_slave_thread_options(thd);
   thd->client_capabilities = CLIENT_LOCAL_FILES;
-  mysql_mutex_lock(&LOCK_thread_count);
-  thd->thread_id= thd->variables.pseudo_thread_id= thread_id++;
-  mysql_mutex_unlock(&LOCK_thread_count);
+  thd->thread_id= thd->variables.pseudo_thread_id= next_thread_id();
 
   if (thd_type == SLAVE_THD_SQL)
     THD_STAGE_INFO(thd, stage_waiting_for_the_next_event_in_relay_log);
@@ -4131,9 +4086,7 @@ pthread_handler_t handle_slave_io(void *arg)
     goto err_during_init;
   }
   thd->system_thread_info.rpl_io_info= &io_info;
-  mysql_mutex_lock(&LOCK_thread_count);
-  threads.append(thd);
-  mysql_mutex_unlock(&LOCK_thread_count);
+  add_to_active_threads(thd);
   mi->slave_running = MYSQL_SLAVE_RUN_NOT_CONNECT;
   mi->abort_slave = 0;
   mysql_mutex_unlock(&mi->run_lock);
@@ -4456,6 +4409,7 @@ err:
     flush_master_info(mi, TRUE, TRUE);
   THD_STAGE_INFO(thd, stage_waiting_for_slave_mutex_on_exit);
   thd->add_status_to_global();
+  unlink_not_visible_thd(thd);
   mysql_mutex_lock(&mi->run_lock);
 
 err_during_init:
@@ -4515,7 +4469,8 @@ int check_temp_dir(char* tmp_file)
   size_t tmp_dir_size;
   DBUG_ENTER("check_temp_dir");
 
-  mysql_mutex_lock(&LOCK_thread_count);
+  /* This look is safe to use as this function is only called once */
+  mysql_mutex_lock(&LOCK_start_thread);
   if (check_temp_dir_run)
   {
     if ((result= check_temp_dir_result))
@@ -4554,7 +4509,9 @@ int check_temp_dir(char* tmp_file)
   mysql_file_delete(key_file_misc, tmp_file, MYF(0));
 
 end:
-  mysql_mutex_unlock(&LOCK_thread_count);
+
+  check_temp_dir_result= result;
+  mysql_mutex_unlock(&LOCK_start_thread);
   DBUG_RETURN(result);
 }
 
@@ -4732,9 +4689,7 @@ pthread_handler_t handle_slave_sql(void *arg)
     applied. In all other cases it must be FALSE.
   */
   thd->variables.binlog_annotate_row_events= 0;
-  mysql_mutex_lock(&LOCK_thread_count);
-  threads.append(thd);
-  mysql_mutex_unlock(&LOCK_thread_count);
+  add_to_active_threads(thd);
   /*
     We are going to set slave_running to 1. Assuming slave I/O thread is
     alive and connected, this is going to make Seconds_Behind_Master be 0
@@ -5046,7 +5001,9 @@ pthread_handler_t handle_slave_sql(void *arg)
   }
   THD_STAGE_INFO(thd, stage_waiting_for_slave_mutex_on_exit);
   thd->add_status_to_global();
+  unlink_not_visible_thd(thd);
   mysql_mutex_lock(&rli->run_lock);
+
 err_during_init:
   /* We need data_lock, at least to wake up any waiting master_pos_wait() */
   mysql_mutex_lock(&rli->data_lock);
@@ -5070,12 +5027,8 @@ err_during_init:
     to avoid unneeded position re-init
   */
   thd->temporary_tables = 0; // remove tempation from destructor to close them
-  THD_CHECK_SENTRY(thd);
   rli->sql_driver_thd= 0;
-  mysql_mutex_lock(&LOCK_thread_count);
   thd->rgi_fake= thd->rgi_slave= NULL;
-  delete serial_rgi;
-  mysql_mutex_unlock(&LOCK_thread_count);
 
 #ifdef WITH_WSREP
   /*
@@ -5104,10 +5057,11 @@ err_during_init:
 #endif /* WITH_WSREP */
 
  /*
-  Note: the order of the broadcast and unlock calls below (first broadcast, then unlock)
-  is important. Otherwise a killer_thread can execute between the calls and
-  delete the mi structure leading to a crash! (see BUG#25306 for details)
- */ 
+   Note: the order of the broadcast and unlock calls below (first
+   broadcast, then unlock) is important. Otherwise a killer_thread can
+   execute between the calls and delete the mi structure leading to a
+   crash! (see BUG#25306 for details)
+ */
   mysql_cond_broadcast(&rli->stop_cond);
   DBUG_EXECUTE_IF("simulate_slave_delay_at_terminate_bug38694", sleep(5););
   mysql_mutex_unlock(&rli->run_lock);  // tell the world we are done
@@ -5124,9 +5078,11 @@ err_during_init:
     rpl_parallel_inactivate_pool(&global_rpl_thread_pool);
   mysql_mutex_unlock(&LOCK_active_mi);
 
+  /* TODO: Check if this lock is needed */
   mysql_mutex_lock(&LOCK_thread_count);
-  thd->unlink();
+  delete serial_rgi;
   mysql_mutex_unlock(&LOCK_thread_count);
+
   delete thd;
   thread_safe_decrement32(&service_thread_count);
   signal_thd_deleted();

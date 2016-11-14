@@ -132,6 +132,7 @@ void Item_func::sync_with_sum_func_and_with_field(List<Item> &list)
   while ((item= li++))
   {
     with_sum_func|= item->with_sum_func;
+    with_window_func|= item->with_window_func;
     with_field|= item->with_field;
   }
 }
@@ -226,6 +227,7 @@ Item_func::fix_fields(THD *thd, Item **ref)
 	maybe_null=1;
 
       with_sum_func= with_sum_func || item->with_sum_func;
+      with_window_func= with_window_func || item->with_window_func;
       with_field= with_field || item->with_field;
       used_tables_and_const_cache_join(item);
       with_subselect|=        item->has_subquery();
@@ -431,7 +433,7 @@ void Item_args::propagate_equal_fields(THD *thd,
   See comments in Item_cond::split_sum_func()
 */
 
-void Item_func::split_sum_func(THD *thd, Item **ref_pointer_array,
+void Item_func::split_sum_func(THD *thd,  Ref_ptr_array ref_pointer_array,
                                List<Item> &fields, uint flags)
 {
   Item **arg, **arg_end;
@@ -3509,7 +3511,7 @@ udf_handler::fix_fields(THD *thd, Item_func_or_sum *func,
       func->used_tables_and_const_cache_join(item);
       f_args.arg_type[i]=item->result_type();
     }
-    //TODO: why all following memory is not allocated with 1 call of sql_alloc?
+    //TODO: why all following memory is not allocated with 1 thd->alloc() call?
     if (!(buffers=new String[arg_count]) ||
 	!(f_args.args= (char**) thd->alloc(arg_count * sizeof(char *))) ||
 	!(f_args.lengths= (ulong*) thd->alloc(arg_count * sizeof(long))) ||
@@ -4896,9 +4898,16 @@ Item_func_set_user_var::update_hash(void *ptr, uint length,
     If we set a variable explicitely to NULL then keep the old
     result type of the variable
   */
-  if ((null_value= args[0]->null_value) && null_item)
+  if (args[0]->type() == Item::FIELD_ITEM)
+  {
+    /* args[0]->null_value may be outdated */
+    null_value= ((Item_field*)args[0])->field->is_null();
+  }
+  else
+    null_value= args[0]->null_value;
+  if (null_value && null_item)
     res_type= m_var_entry->type;                 // Don't change type of item
-  if (::update_hash(m_var_entry, (null_value= args[0]->null_value),
+  if (::update_hash(m_var_entry, null_value,
                     ptr, length, res_type, cs, unsigned_arg))
   {
     null_value= 1;
@@ -5302,7 +5311,7 @@ bool Item_func_set_user_var::send(Protocol *protocol, String *str_arg)
   return Item::send(protocol, str_arg);
 }
 
-void Item_func_set_user_var::make_field(Send_field *tmp_field)
+void Item_func_set_user_var::make_field(THD *thd, Send_field *tmp_field)
 {
   if (result_field)
   {
@@ -5312,7 +5321,7 @@ void Item_func_set_user_var::make_field(Send_field *tmp_field)
       tmp_field->col_name=Item::name;               // Use user supplied name
   }
   else
-    Item::make_field(tmp_field);
+    Item::make_field(thd, tmp_field);
 }
 
 
@@ -5768,7 +5777,7 @@ Item_func_get_system_var(THD *thd, sys_var *var_arg, enum_var_type var_type_arg,
   orig_var_type(var_type_arg), component(*component_arg), cache_present(0)
 {
   /* set_name() will allocate the name */
-  set_name(name_arg, (uint) name_len_arg, system_charset_info);
+  set_name(thd, name_arg, (uint) name_len_arg, system_charset_info);
 }
 
 
@@ -6725,7 +6734,7 @@ error:
 
 
 void
-Item_func_sp::make_field(Send_field *tmp_field)
+Item_func_sp::make_field(THD *thd, Send_field *tmp_field)
 {
   DBUG_ENTER("Item_func_sp::make_field");
   DBUG_ASSERT(sp_result_field);

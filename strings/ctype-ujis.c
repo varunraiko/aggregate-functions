@@ -198,6 +198,7 @@ static const uchar sort_order_ujis[]=
 #define IS_MB2_KATA(x,y)      (isujis_ss2(x)    && iskata(y))
 #define IS_MB2_CHAR(x, y)     (IS_MB2_KATA(x,y) || IS_MB2_JIS(x,y))
 #define IS_MB3_CHAR(x, y, z)  (isujis_ss3(x)    && IS_MB2_JIS(y,z))
+#define IS_MB_PREFIX2(x,y)    (isujis_ss3(x)    && isujis(y))
 #define DEFINE_ASIAN_ROUTINES
 #include "ctype-mb.ic"
 
@@ -218,16 +219,6 @@ static const uchar sort_order_ujis[]=
 #define WEIGHT_MB3(x,y,z)    (WEIGHT_MB2(x,y) | ((uint) (uchar) z))
 #include "strcoll.ic"
 
-
-static uint ismbchar_ujis(CHARSET_INFO *cs __attribute__((unused)),
-		  const char* p, const char *e)
-{
-  return ((*(uchar*)(p)<0x80)? 0:\
-    isujis(*(p)) && (e)-(p)>1 && isujis(*((p)+1))? 2:\
-    isujis_ss2(*(p)) && (e)-(p)>1 && iskata(*((p)+1))? 2:\
-    isujis_ss3(*(p)) && (e)-(p)>2 && isujis(*((p)+1)) && isujis(*((p)+2))? 3:\
-    0);
-}
 
 static uint mbcharlen_ujis(CHARSET_INFO *cs __attribute__((unused)),uint c)
 {
@@ -67264,7 +67255,6 @@ static MY_COLLATION_HANDLER my_collation_ujis_bin_handler =
 static MY_CHARSET_HANDLER my_charset_handler=
 {
     NULL,		/* init */
-    ismbchar_ujis,
     mbcharlen_ujis,
     my_numchars_mb,
     my_charpos_mb,

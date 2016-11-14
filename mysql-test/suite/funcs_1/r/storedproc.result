@@ -1832,9 +1832,11 @@ CREATE PROCEDURE sp11() insert into mysql.t1 values('a');
 SELECT security_type from mysql.proc where specific_name='sp11';
 security_type
 DEFINER
+connect  u_1, localhost, user_1, , db_storedproc;
 	
 user_1@localhost	db_storedproc
 CALL sp11();
+connection default;
 USE db_storedproc;
 	
 root@localhost	db_storedproc
@@ -1842,12 +1844,15 @@ alter procedure sp11 sql security invoker;
 SELECT security_type from mysql.proc where specific_name='sp11';
 security_type
 INVOKER
+connection u_1;
 	
 user_1@localhost	db_storedproc
 USE db_storedproc;
 CALL sp11();
 ERROR 42000: INSERT command denied to user 'user_1'@'localhost' for table 't1'
 commit work;
+disconnect u_1;
+connection default;
 	
 root@localhost	db_storedproc
 alter procedure sp11 sql security DEFINER;
@@ -3816,7 +3821,7 @@ return 1' at line 1
 CREATE FUNCTION fn1(a char) returns int lang sql return 1;
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'sql return 1' at line 1
 CREATE FUNCTION fn1(a char) returns int deterministic( return 1);
-ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'return 1)' at line 1
+ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near '( return 1)' at line 1
 CREATE FUNCTION fn1(a char) returns int non deterministic return 1;
 ERROR 42000: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near 'deterministic return 1' at line 1
 CREATE FUNCTION fn1(a char) returns int not deterministic comment 'abc' language sql sql security refiner return 1;

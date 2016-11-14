@@ -86,7 +86,6 @@ struct Worker_thread_context
 #endif
     pthread_setspecific(THR_KEY_mysys,mysys_var);
     pthread_setspecific(THR_THD, 0);
-    pthread_setspecific(THR_MALLOC, 0);
   }
 };
 
@@ -129,7 +128,7 @@ static inline void set_thd_idle(THD *thd)
 /*
   Attach/associate the connection with the OS thread,
 */
-static bool thread_attach(THD* thd)
+static void thread_attach(THD* thd)
 {
   pthread_setspecific(THR_KEY_mysys,thd->mysys_var);
   thd->thread_stack=(char*)&thd;
@@ -137,14 +136,15 @@ static bool thread_attach(THD* thd)
 #ifdef HAVE_PSI_THREAD_INTERFACE
   PSI_THREAD_CALL(set_thread)(thd->event_scheduler.m_psi);
 #endif
-  mysql_socket_set_thread_owner(thd->net.vio->mysql_socket);
-  return 0;
+
 }
 
 
-int threadpool_add_connection(THD *thd)
+THD* threadpool_add_connection(CONNECT *connect, void *scheduler_data)
 {
-  int retval=1;
+  THD *thd= NULL;
+  int error=1;
+
   Worker_thread_context worker_context;
   worker_context.save();
 
@@ -155,13 +155,29 @@ int threadpool_add_connection(THD *thd)
 
   pthread_setspecific(THR_KEY_mysys, 0);
   my_thread_init();
-  thd->mysys_var= (st_my_thread_var *)pthread_getspecific(THR_KEY_mysys);
-  if (!thd->mysys_var)
+  st_my_thread_var* mysys_var= (st_my_thread_var *)pthread_getspecific(THR_KEY_mysys);
+  if (!mysys_var ||!(thd= connect->create_thd()))
   {
     /* Out of memory? */
+    connect->close_and_delete();
+    if (mysys_var)
+    {
+#ifdef HAVE_PSI_INTERFACE
+      /*
+       current PSI is still from worker thread.
+       Set to 0, to avoid premature cleanup by my_thread_end
+      */
+      if (PSI_server) PSI_server->set_thread(0);
+#endif
+      my_thread_end();
+    }
     worker_context.restore();
-    return 1;
+    return NULL;
   }
+  delete connect;
+  add_to_active_threads(thd);
+  thd->mysys_var= mysys_var;
+  thd->event_scheduler.data= scheduler_data;
 
   /* Create new PSI thread for use with the THD. */
 #ifdef HAVE_PSI_THREAD_INTERFACE
@@ -178,40 +194,33 @@ int threadpool_add_connection(THD *thd)
   thd->start_utime= now;
   thd->thr_create_utime= now;
 
-  if (setup_connection_thread_globals(thd))
-    goto end;
 
-  if (thd_prepare_connection(thd))
-    goto end;
-
-  /*
-    Check if THD is ok, as prepare_new_connection_state()
-    can fail, for example if init command failed.
-  */
-  if (!thd_is_connection_alive(thd))
-    goto end;
-
-  retval= 0;
-  thd->skip_wait_timeout= true;
-  set_thd_idle(thd);
-
-end:
+  if (!setup_connection_thread_globals(thd))
+  {
+    if (!login_connection(thd))
+    {
+      prepare_new_connection_state(thd);
+      
+      /* 
+        Check if THD is ok, as prepare_new_connection_state()
+        can fail, for example if init command failed.
+      */
+      if (thd_is_connection_alive(thd))
+      {
+        error= 0;
+        thd->net.reading_or_writing= 1;
+        thd->skip_wait_timeout= true;
+      }
+    }
+  }
+  if (error)
+  {
+    threadpool_remove_connection(thd);
+    thd= NULL;
+  }
+>>>>>>> origin/10.2
   worker_context.restore();
-  return retval;
-}
-
-/*
-  threadpool_cleanup_connection() does the bulk of connection shutdown work.
-  Usually called from threadpool_remove_connection(), but rarely it might
-  be called also in the main polling thread if connection initialization fails.
-*/
-void threadpool_cleanup_connection(THD *thd)
-{
-  thd->net.reading_or_writing = 0;
-  end_connection(thd);
-  close_connection(thd, 0);
-  unlink_thd(thd);
-  mysql_cond_broadcast(&COND_thread_count);
+  return thd;
 }
 
 
@@ -221,7 +230,12 @@ void threadpool_remove_connection(THD *thd)
   worker_context.save();
   thread_attach(thd);
 
-  threadpool_cleanup_connection(thd);
+  thd->net.reading_or_writing = 0;
+  end_connection(thd);
+  close_connection(thd, 0);
+  unlink_thd(thd);
+  mysql_cond_broadcast(&COND_thread_count);
+
   /*
     Free resources associated with this connection: 
     mysys thread_var and PSI thread.
@@ -254,7 +268,8 @@ int threadpool_process_request(THD *thd)
 
 
   /*
-    In the loop below, the flow is essentially the copy of thead-per-connections
+    In the loop below, the flow is essentially the copy of
+    thead-per-connections
     logic, see do_handle_one_connection() in sql_connect.c
 
     The goal is to execute a single query, thus the loop is normally executed 
@@ -294,18 +309,31 @@ end:
 }
 
 
+
+/* Dummy functions, do nothing */
+
+static bool tp_init_new_connection_thread()
+{
+  return 0;
+}
+
+static bool tp_end_thread(THD *, bool)
+{
+  return 0;
+}
+
 static scheduler_functions tp_scheduler_functions=
 {
   0,                                  // max_threads
   NULL,
   NULL,
   tp_init,                            // init
-  NULL,                               // init_new_connection_thread
+  tp_init_new_connection_thread,      // init_new_connection_thread
   tp_add_connection,                  // add_connection
   tp_wait_begin,                      // thd_wait_begin
   tp_wait_end,                        // thd_wait_end
   post_kill_notification,             // post_kill_notification
-  NULL,                               // end_thread
+  tp_end_thread,                      // Dummy function
   tp_end                              // end
 };
 

@@ -486,6 +486,30 @@ static inline bool do_ignore_flag_optimization(
     return do_opt;
 }
 
+static inline uint get_key_parts(const KEY *key) {
+#if (50609 <= MYSQL_VERSION_ID && MYSQL_VERSION_ID <= 50699) || \
+    (50700 <= MYSQL_VERSION_ID && MYSQL_VERSION_ID <= 50799) || \
+    (100009 <= MYSQL_VERSION_ID)
+    return key->user_defined_key_parts;
+#else
+    return key->key_parts;
+#endif
+}
+
+#if TOKU_INCLUDE_EXTENDED_KEYS
+static inline uint get_ext_key_parts(const KEY *key) {
+#if (50609 <= MYSQL_VERSION_ID && MYSQL_VERSION_ID <= 50699) || \
+    (50700 <= MYSQL_VERSION_ID && MYSQL_VERSION_ID <= 50799)
+    return key->actual_key_parts;
+#elif defined(MARIADB_BASE_VERSION)
+    return key->ext_key_parts;
+#else
+#error
+#endif
+}
+#endif
+
+>>>>>>> origin/10.2
 ulonglong ha_tokudb::table_flags() const {
     return int_table_flags | HA_BINLOG_ROW_CAPABLE | HA_BINLOG_STMT_CAPABLE;
 }
@@ -2139,7 +2163,7 @@ int ha_tokudb::write_frm_data(DB* db, DB_TXN* txn, const char* frm_name) {
     size_t frm_len = 0;
     int error = 0;
 
-#if 100000 <= MYSQL_VERSION_ID && MYSQL_VERSION_ID <= 100199
+#if 100000 <= MYSQL_VERSION_ID
     error = table_share->read_frm_image((const uchar**)&frm_data,&frm_len);
     if (error) { goto cleanup; }
 #else    
@@ -2179,7 +2203,7 @@ int ha_tokudb::verify_frm_data(const char* frm_name, DB_TXN* txn) {
     HA_METADATA_KEY curr_key = hatoku_frm_data;
 
     // get the frm data from MySQL
-#if 100000 <= MYSQL_VERSION_ID && MYSQL_VERSION_ID <= 100199
+#if 100000 <= MYSQL_VERSION_ID
     error = table_share->read_frm_image((const uchar**)&mysql_frm_data,&mysql_frm_len);
     if (error) { 
         goto cleanup;

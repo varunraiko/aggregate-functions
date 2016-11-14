@@ -4453,7 +4453,8 @@ int Query_log_event::do_apply_event(rpl_group_info *rgi,
          }
 
         thd->enable_slow_log= thd->variables.sql_log_slow;
-        mysql_parse(thd, thd->query(), thd->query_length(), &parser_state);
+        mysql_parse(thd, thd->query(), thd->query_length(), &parser_state,
+                    FALSE);
         /* Finalize server status flags after executing a statement. */
         thd->update_server_status();
         log_slow_statement(thd);
@@ -4537,7 +4538,7 @@ compare_errors:
                   "Error on master: message (format)='%s' error code=%d ; "
                   "Error on slave: actual message='%s', error code=%d. "
                   "Default database: '%s'. Query: '%s'",
-                  ER_SAFE_THD(thd, expected_error),
+                  ER_THD(thd, expected_error),
                   expected_error,
                   actual_error ? thd->get_stmt_da()->message() : "no error",
                   actual_error,
