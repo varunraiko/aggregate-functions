@@ -10,3 +10,5 @@
 #
 ##############################################################################
 
+innodb_defragment_fill_factor : MDEV-10771
+innodb.innodb_trx_weight      : MDEV-11185

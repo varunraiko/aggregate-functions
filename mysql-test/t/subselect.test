@@ -51,7 +51,7 @@ SELECT * FROM (SELECT 1 as id) b WHERE id IN (SELECT * FROM (SELECT 1 as id) c O
 SELECT * FROM (SELECT 1) a  WHERE 1 IN (SELECT 1,1);
 SELECT 1 IN (SELECT 1);
 SELECT 1 FROM (SELECT 1 as a) b WHERE 1 IN (SELECT (SELECT a));
--- error ER_WRONG_USAGE
+-- error ER_PARSE_ERROR
 select (SELECT 1 FROM (SELECT 1) a PROCEDURE ANALYSE(1));
 -- error ER_PARSE_ERROR
 SELECT 1 FROM (SELECT 1) a PROCEDURE ANALYSE((SELECT 1));
@@ -569,7 +569,7 @@ drop table t1, t2;
 create table t1 (a float);
 -- error ER_NOT_SUPPORTED_YET
 select 10.5 IN (SELECT * from t1 LIMIT 1);
--- error ER_WRONG_USAGE
+-- error ER_PARSE_ERROR
 select 10.5 IN (SELECT * from t1 LIMIT 1 UNION SELECT 1.5);
 -- error ER_NOT_SUPPORTED_YET
 select 10.5 IN (SELECT * from t1 UNION SELECT 1.5 LIMIT 1);
@@ -6009,5 +6009,22 @@ SET NAMES utf8;
 CREATE TABLE t1 (f VARCHAR(8)) ENGINE=MyISAM;
 INSERT INTO t1 VALUES ('foo');
 SELECT f FROM t1 WHERE f > ALL ( SELECT 'bar' UNION SELECT 'baz' );
+SELECT f FROM t1 WHERE f > ALL ( SELECT 'bar');
 drop table t1;
 SET NAMES default;
+
+--echo #
+--echo # MDEV-10045: Server crashes in Time_and_counter_tracker::incr_loops
+--echo #
+SET NAMES utf8;
+
+CREATE TABLE t1 (f1 VARCHAR(3), f2 INT UNSIGNED) ENGINE=MyISAM;
+CREATE TABLE t2 (f3 INT) ENGINE=MyISAM;
+
+SELECT * FROM t1, t2 WHERE f3 = f2 AND f1 > ANY ( SELECT 'foo' UNION SELECT 'bar' );
+SELECT * FROM t1, t2 WHERE f3 = f2 AND f1 > ANY ( SELECT 'foo');
+
+DROP TABLE t1, t2;
+SET NAMES default;
+
+--echo End of 10.1 tests

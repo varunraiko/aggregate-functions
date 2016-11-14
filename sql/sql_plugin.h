@@ -120,6 +120,8 @@ struct st_plugin_int
 };
 
 
+extern mysql_mutex_t LOCK_plugin;
+
 /*
   See intern_plugin_lock() for the explanation for the
   conditionally defined plugin_ref type
@@ -180,6 +182,7 @@ sys_var *find_plugin_sysvar(st_plugin_int *plugin, st_mysql_sys_var *var);
 void plugin_opt_set_limits(struct my_option *, const struct st_mysql_sys_var *);
 extern SHOW_COMP_OPTION plugin_status(const char *name, size_t len, int type);
 extern bool check_valid_path(const char *path, size_t length);
+extern void plugin_mutex_init();
 
 typedef my_bool (plugin_foreach_func)(THD *thd,
                                       plugin_ref plugin,
@@ -187,8 +190,19 @@ typedef my_bool (plugin_foreach_func)(THD *thd,
 #define plugin_foreach(A,B,C,D) plugin_foreach_with_mask(A,B,C,PLUGIN_IS_READY,D)
 extern bool plugin_foreach_with_mask(THD *thd, plugin_foreach_func *func,
                                      int type, uint state_mask, void *arg);
+extern void sync_dynamic_session_variables(THD* thd, bool global_lock);
+
 extern bool plugin_dl_foreach(THD *thd, const LEX_STRING *dl,
                               plugin_foreach_func *func, void *arg);
 
+sys_var *find_sys_var_ex(THD *thd, const char *str, size_t length,
+                         bool throw_error, bool locked);
+
 extern void sync_dynamic_session_variables(THD* thd, bool global_lock);
 #endif
+
+#ifdef WITH_WSREP
+extern void wsrep_plugins_pre_init();
+extern void wsrep_plugins_post_init();
+#endif /* WITH_WSREP */
+

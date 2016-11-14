@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 1996, 2015, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 1996, 2016, Oracle and/or its affiliates. All Rights Reserved.
 Copyright (c) 2014, 2015, MariaDB Corporation
 
 This program is free software; you can redistribute it and/or modify it under
@@ -380,8 +380,8 @@ struct lock_stack_t {
 	ulint		heap_no;		/*!< heap number if rec lock */
 };
 
-extern "C" void thd_report_wait_for(MYSQL_THD thd, MYSQL_THD other_thd);
-extern "C" int thd_need_wait_for(const MYSQL_THD thd);
+extern "C" void thd_rpl_deadlock_check(MYSQL_THD thd, MYSQL_THD other_thd);
+extern "C" int thd_need_wait_reports(const MYSQL_THD thd);
 extern "C"
 int thd_need_ordering_with(const MYSQL_THD thd, const MYSQL_THD other_thd);
 
@@ -406,7 +406,7 @@ UNIV_INTERN mysql_pfs_key_t	lock_sys_wait_mutex_key;
 struct thd_wait_reports {
 	struct thd_wait_reports *next;	/*!< List link */
 	ulint used;			/*!< How many elements in waitees[] */
-	trx_t *waitees[64];		/*!< Trxs for thd_report_wait_for() */
+	trx_t *waitees[64];		/*!< Trxs for thd_rpl_deadlock_check() */
 };
 
 
@@ -429,7 +429,7 @@ ibool
 lock_rec_validate_page(
 /*===================*/
 	const buf_block_t*	block)	/*!< in: buffer block */
-	__attribute__((nonnull, warn_unused_result));
+	MY_ATTRIBUTE((nonnull, warn_unused_result));
 #endif /* UNIV_DEBUG */
 
 /* The lock system */
@@ -513,7 +513,7 @@ Checks that a transaction id is sensible, i.e., not in the future.
 #ifdef UNIV_DEBUG
 UNIV_INTERN
 #else
-static __attribute__((nonnull, warn_unused_result))
+static MY_ATTRIBUTE((nonnull, warn_unused_result))
 #endif
 bool
 lock_check_trx_id_sanity(
@@ -887,9 +887,32 @@ lock_reset_lock_and_trx_wait(
 /*=========================*/
 	lock_t*	lock)	/*!< in/out: record lock */
 {
-	ut_ad(lock->trx->lock.wait_lock == lock);
 	ut_ad(lock_get_wait(lock));
 	ut_ad(lock_mutex_own());
+
+	if (lock->trx->lock.wait_lock != lock) {
+		const char*	stmt=NULL;
+		const char*	stmt2=NULL;
+		size_t		stmt_len;
+		trx_id_t trx_id = 0;
+		stmt = innobase_get_stmt(lock->trx->mysql_thd, &stmt_len);
+
+		if (lock->trx->lock.wait_lock &&
+			lock->trx->lock.wait_lock->trx) {
+			trx_id = lock->trx->lock.wait_lock->trx->id;
+			stmt2 = innobase_get_stmt(lock->trx->lock.wait_lock->trx->mysql_thd, &stmt_len);
+		}
+
+		ib_logf(IB_LOG_LEVEL_INFO,
+			"Trx id %lu is waiting a lock in statement %s"
+			" for this trx id %lu and statement %s wait_lock %p",
+			lock->trx->id,
+			stmt ? stmt : "NULL",
+			trx_id,
+			stmt2 ? stmt2 : "NULL",
+			lock->trx->lock.wait_lock);
+		ut_error;
+	}
 
 	lock->trx->lock.wait_lock = NULL;
 	lock->type_mode &= ~LOCK_WAIT;
@@ -1641,7 +1664,7 @@ lock_rec_discard(lock_t*	in_lock);
 /*********************************************************************//**
 Checks if some other transaction has a lock request in the queue.
 @return	lock or NULL */
-static __attribute__((nonnull, warn_unused_result))
+static MY_ATTRIBUTE((nonnull, warn_unused_result))
 const lock_t*
 lock_rec_other_has_expl_req(
 /*========================*/
@@ -1692,6 +1715,10 @@ wsrep_kill_victim(
 {
         ut_ad(lock_mutex_own());
         ut_ad(trx_mutex_own(lock->trx));
+
+	/* quit for native mysql */
+	if (!wsrep_on(trx->mysql_thd)) return;
+
 	my_bool bf_this  = wsrep_thd_is_BF(trx->mysql_thd, FALSE);
 	my_bool bf_other = wsrep_thd_is_BF(lock->trx->mysql_thd, TRUE);
 
@@ -1778,9 +1805,11 @@ lock_rec_other_has_conflicting(
 
 #ifdef WITH_WSREP
 		if (lock_rec_has_to_wait(TRUE, trx, mode, lock, is_supremum)) {
-			trx_mutex_enter(lock->trx);
-			wsrep_kill_victim((trx_t *)trx, (lock_t *)lock);
-			trx_mutex_exit(lock->trx);
+			if (wsrep_on(trx->mysql_thd)) {
+				trx_mutex_enter(lock->trx);
+				wsrep_kill_victim(trx, lock);
+				trx_mutex_exit(lock->trx);
+			}
 #else
  		if (lock_rec_has_to_wait(trx, mode, lock, is_supremum)) {
 #endif /* WITH_WSREP */
@@ -2086,7 +2115,9 @@ lock_rec_create(
 	ut_ad(index->table->n_ref_count > 0 || !index->table->can_be_evicted);
 
 #ifdef WITH_WSREP
-	if (c_lock && wsrep_thd_is_BF(trx->mysql_thd, FALSE)) {
+	if (c_lock                      &&
+	    wsrep_on(trx->mysql_thd)    &&
+	    wsrep_thd_is_BF(trx->mysql_thd, FALSE)) {
 		lock_t *hash	= (lock_t *)c_lock->hash;
 		lock_t *prev	= NULL;
 
@@ -2420,7 +2451,7 @@ lock_rec_add_to_queue(
 				if (wsrep_debug) {
 					fprintf(stderr,
 						"BF skipping wait: %lu\n",
-						trx->id);
+						(ulong) trx->id);
 					lock_rec_print(stderr, lock);
 				}
 		  } else
@@ -4055,7 +4086,7 @@ lock_get_next_lock(
 			ut_ad(heap_no == ULINT_UNDEFINED);
 			ut_ad(lock_get_type_low(lock) == LOCK_TABLE);
 
-			lock = UT_LIST_GET_PREV(un_member.tab_lock.locks, lock);
+			lock = UT_LIST_GET_NEXT(un_member.tab_lock.locks, lock);
 		}
 	} while (lock != NULL
 		 && lock->trx->lock.deadlock_mark > ctx->mark_start);
@@ -4105,7 +4136,8 @@ lock_get_first_lock(
 	} else {
 		*heap_no = ULINT_UNDEFINED;
 		ut_ad(lock_get_type_low(lock) == LOCK_TABLE);
-		lock = UT_LIST_GET_PREV(un_member.tab_lock.locks, lock);
+		dict_table_t*   table = lock->un_member.tab_lock.table;
+		lock = UT_LIST_GET_FIRST(table->locks);
 	}
 
 	ut_a(lock != NULL);
@@ -4480,14 +4512,7 @@ lock_report_waiters_to_mysql(
 			/*  There is no need to report waits to a trx already
 			selected as a victim. */
 			if (w_trx->id != victim_trx_id) {
-				/* If thd_report_wait_for() decides to kill the
-				transaction, then we will get a call back into
-				innobase_kill_query. We mark this by setting
-				current_lock_mutex_owner, so we can avoid trying
-				to recursively take lock_sys->mutex. */
-				w_trx->abort_type = TRX_REPLICATION_ABORT;
-				thd_report_wait_for(mysql_thd, w_trx->mysql_thd);
-				w_trx->abort_type = TRX_SERVER_ABORT;
+				thd_rpl_deadlock_check(mysql_thd, w_trx->mysql_thd);
 			}
 			++i;
 		}
@@ -4526,7 +4551,7 @@ lock_deadlock_check_and_resolve(
 	assert_trx_in_list(trx);
 
 	start_mysql_thd = trx->mysql_thd;
-	if (start_mysql_thd && thd_need_wait_for(start_mysql_thd)) {
+	if (start_mysql_thd && thd_need_wait_reports(start_mysql_thd)) {
 		waitee_buf_ptr = &waitee_buf;
 	} else {
 		waitee_buf_ptr = NULL;
@@ -4577,8 +4602,6 @@ lock_deadlock_check_and_resolve(
 			}
 #endif /* WITH_WSREP */
 
-			MONITOR_INC(MONITOR_DEADLOCK);
-
 		} else if (victim_trx_id != 0 && victim_trx_id != trx->id) {
 
 			ut_ad(victim_trx_id == ctx.wait_lock->trx->id);
@@ -4587,14 +4610,15 @@ lock_deadlock_check_and_resolve(
 			lock_deadlock_found = TRUE;
 
 			MONITOR_INC(MONITOR_DEADLOCK);
+			srv_stats.lock_deadlock_count.inc();
 		}
-
 	} while (victim_trx_id != 0 && victim_trx_id != trx->id);
 
 	/* If the joining transaction was selected as the victim. */
 	if (victim_trx_id != 0) {
 		ut_a(victim_trx_id == trx->id);
 
+		MONITOR_INC(MONITOR_DEADLOCK);
 		srv_stats.lock_deadlock_count.inc();
 
 		lock_deadlock_fputs("*** WE ROLL BACK TRANSACTION (2)\n");
@@ -4711,10 +4735,10 @@ lock_table_create(
 			trx_mutex_exit(c_lock->trx);
 		}
 	} else {
-		UT_LIST_ADD_LAST(un_member.tab_lock.locks, table->locks, lock);
-	}
-#else
+#endif /* WITH_WSREP */
 	UT_LIST_ADD_LAST(un_member.tab_lock.locks, table->locks, lock);
+#ifdef WITH_WSREP
+	}
 #endif /* WITH_WSREP */
 
 	if (UNIV_UNLIKELY(type_mode & LOCK_WAIT)) {
@@ -5009,7 +5033,7 @@ lock_table_other_has_incompatible(
 #ifdef WITH_WSREP
 			if(wsrep_thd_is_wsrep(trx->mysql_thd)) {
 				if (wsrep_debug) {
-					fprintf(stderr, "WSREP: trx %ld table lock abort\n",
+					fprintf(stderr, "WSREP: trx " TRX_ID_FMT " table lock abort\n",
 						trx->id);
 				}
 				trx_mutex_enter(lock->trx);
@@ -5047,7 +5071,8 @@ lock_table(
 	dberr_t		err;
 	const lock_t*	wait_for;
 
-	ut_ad(table && thr);
+	ut_ad(table != NULL);
+	ut_ad(thr != NULL);
 
 	if (flags & BTR_NO_LOCKING_FLAG) {
 
@@ -6495,7 +6520,7 @@ lock_validate_table_locks(
 /*********************************************************************//**
 Validate record locks up to a limit.
 @return lock at limit or NULL if no more locks in the hash bucket */
-static __attribute__((nonnull, warn_unused_result))
+static MY_ATTRIBUTE((nonnull, warn_unused_result))
 const lock_t*
 lock_rec_validate(
 /*==============*/
@@ -6901,7 +6926,7 @@ lock_clust_rec_modify_check_and_lock(
 	lock_rec_convert_impl_to_expl(block, rec, index, offsets);
 
 	lock_mutex_enter();
-	trx_t*		trx = thr_get_trx(thr);
+	trx_t*		trx __attribute__((unused))= thr_get_trx(thr);
 
 	ut_ad(lock_table_has(trx, index->table, LOCK_IX));
 
@@ -6965,7 +6990,7 @@ lock_sec_rec_modify_check_and_lock(
 	index record, and this would not have been possible if another active
 	transaction had modified this secondary index record. */
 
-	trx_t* trx = thr_get_trx(thr);
+	trx_t* trx __attribute__((unused))= thr_get_trx(thr);
 	lock_mutex_enter();
 
 	ut_ad(lock_table_has(trx, index->table, LOCK_IX));
@@ -7074,7 +7099,7 @@ lock_sec_rec_read_check_and_lock(
 		lock_rec_convert_impl_to_expl(block, rec, index, offsets);
 	}
 
-	trx_t* trx = thr_get_trx(thr);
+	trx_t* trx __attribute__((unused))= thr_get_trx(thr);
 	lock_mutex_enter();
 
 	ut_ad(mode != LOCK_X
@@ -7157,7 +7182,7 @@ lock_clust_rec_read_check_and_lock(
 	}
 
 	lock_mutex_enter();
-	trx_t* trx = thr_get_trx(thr);
+	trx_t* trx __attribute__((unused))= thr_get_trx(thr);
 
 	ut_ad(mode != LOCK_X
 	      || lock_table_has(trx, index->table, LOCK_IX));

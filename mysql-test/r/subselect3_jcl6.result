@@ -134,6 +134,7 @@ Handler_read_key	0
 Handler_read_last	0
 Handler_read_next	0
 Handler_read_prev	0
+Handler_read_retry	0
 Handler_read_rnd	0
 Handler_read_rnd_deleted	0
 Handler_read_rnd_next	41
@@ -899,6 +900,7 @@ ERROR 42S22: Unknown column 'c' in 'field list'
 SHOW WARNINGS;
 Level	Code	Message
 Note	1276	Field or reference 'test.t1.a' of SELECT #3 was resolved in SELECT #2
+Note	1981	Aggregate function 'count()' of SELECT #3 belongs to SELECT #2
 Note	1276	Field or reference 'test.t1.c' of SELECT #3 was resolved in SELECT #2
 Error	1054	Unknown column 'c' in 'field list'
 DROP TABLE t1;
@@ -1304,7 +1306,7 @@ id	select_type	table	type	possible_keys	key	key_len	ref	rows	Extra
 set @save_optimizer_search_depth=@@optimizer_search_depth;
 set @@optimizer_search_depth=63;
 Warnings:
-Warning	1287	'optimizer-search-depth=63' is deprecated and will be removed in a future release. Please use a search depth less than 63 instead
+Warning	1292	Truncated incorrect optimizer_search_depth value: '63'
 explain select * from t1 where (a,b) in (select a,b from t2);
 id	select_type	table	type	possible_keys	key	key_len	ref	rows	Extra
 1	PRIMARY	t1	ALL	NULL	NULL	NULL	NULL	10	Using where

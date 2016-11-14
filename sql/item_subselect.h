@@ -95,6 +95,9 @@ public:
   subselect_engine *engine;
   /* unit of subquery */
   st_select_lex_unit *unit;
+  /* Cached buffers used when calling filesort in sub queries */
+  Filesort_buffer filesort_buffer;
+  LEX_STRING sortbuffer;
   /* A reference from inside subquery predicate to somewhere outside of it */
   class Ref_to_outside : public Sql_alloc
   {
@@ -123,7 +126,14 @@ public:
   bool changed;
 
   /* TRUE <=> The underlying SELECT is correlated w.r.t some ancestor select */
-  bool is_correlated; 
+  bool is_correlated;
+
+  /* 
+    TRUE <=> the subquery contains a recursive reference in the FROM list
+    of one of its selects. In this case some of subquery optimization
+    strategies cannot be applied for the subquery;
+  */
+  bool with_recursive_reference; 
 
   enum subs_type {UNKNOWN_SUBS, SINGLEROW_SUBS,
 		  EXISTS_SUBS, IN_SUBS, ALL_SUBS, ANY_SUBS};
@@ -212,14 +222,14 @@ public:
   */
   virtual void reset_value_registration() {}
   enum_parsing_place place() { return parsing_place; }
-  bool walk(Item_processor processor, bool walk_subquery, uchar *arg);
-  bool mark_as_eliminated_processor(uchar *arg);
-  bool eliminate_subselect_processor(uchar *arg);
-  bool set_fake_select_as_master_processor(uchar *arg);
-  bool enumerate_field_refs_processor(uchar *arg);
-  bool check_vcol_func_processor(uchar *int_arg) 
+  bool walk(Item_processor processor, bool walk_subquery, void *arg);
+  bool mark_as_eliminated_processor(void *arg);
+  bool eliminate_subselect_processor(void *arg);
+  bool set_fake_select_as_master_processor(void *arg);
+  bool enumerate_field_refs_processor(void *arg);
+  bool check_vcol_func_processor(void *arg) 
   {
-    return trace_unsupported_by_check_vcol_func_processor("subselect");
+    return mark_unsupported_function("select ...", arg, VCOL_IMPOSSIBLE);
   }
   /**
     Callback to test if an IN predicate is expensive.
@@ -230,7 +240,7 @@ public:
     @retval TRUE  if the predicate is expensive
     @retval FALSE otherwise
   */
-  bool is_expensive_processor(uchar *arg) { return is_expensive(); }
+  bool is_expensive_processor(void *arg) { return is_expensive(); }
 
   /**
     Get the SELECT_LEX structure associated with this Item.
@@ -239,14 +249,17 @@ public:
   st_select_lex* get_select_lex();
   virtual bool expr_cache_is_needed(THD *);
   virtual void get_cache_parameters(List<Item> &parameters);
-  virtual bool is_subquery_processor (uchar *opt_arg) { return 1; }
-  bool exists2in_processor(uchar *opt_arg) { return 0; }
-  bool limit_index_condition_pushdown_processor(uchar *opt_arg) 
+  virtual bool is_subquery_processor (void *opt_arg) { return 1; }
+  bool exists2in_processor(void *opt_arg) { return 0; }
+  bool limit_index_condition_pushdown_processor(void *opt_arg) 
   {
     return TRUE;
   }
 
   void init_expr_cache_tracker(THD *thd);
+  
+  Item* build_clone(THD *thd, MEM_ROOT *mem_root) { return 0; }
+  Item* get_copy(THD *thd, MEM_ROOT *mem_root) { return 0; }
 
 
   friend class select_result_interceptor;
@@ -378,6 +391,7 @@ public:
   void no_rows_in_result();
 
   enum Item_result result_type() const { return INT_RESULT;}
+  enum_field_types field_type() const { return MYSQL_TYPE_LONGLONG; }
   longlong val_int();
   double val_real();
   String *val_str(String*);
@@ -389,7 +403,7 @@ public:
   bool select_transformer(JOIN *join);
   void top_level_item() { abort_on_null=1; }
   inline bool is_top_level_item() { return abort_on_null; }
-  bool exists2in_processor(uchar *opt_arg);
+  bool exists2in_processor(void *opt_arg);
 
   Item* expr_cache_insert_transformer(THD *thd, uchar *unused);
 
@@ -695,7 +709,7 @@ public:
     in_strategy= (SUBS_STRATEGY_CHOSEN | strategy);
     DBUG_VOID_RETURN;
   }
-  bool exists2in_processor(uchar *opt_arg __attribute__((unused)))
+  bool exists2in_processor(void *opt_arg __attribute__((unused)))
   {
     return 0;
   };
@@ -751,7 +765,8 @@ public:
                          ROWID_MERGE_ENGINE, TABLE_SCAN_ENGINE};
 
   subselect_engine(Item_subselect *si,
-                   select_result_interceptor *res)
+                   select_result_interceptor *res):
+    thd(NULL)
   {
     result= res;
     item= si;
@@ -767,7 +782,7 @@ public:
     Should be called before prepare().
   */
   void set_thd(THD *thd_arg);
-  THD * get_thd() { return thd; }
+  THD * get_thd() { return thd ? thd : current_thd; }
   virtual int prepare(THD *)= 0;
   virtual void fix_length_and_dec(Item_cache** row)= 0;
   /*

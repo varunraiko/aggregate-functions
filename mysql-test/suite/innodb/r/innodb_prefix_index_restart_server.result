@@ -1,6 +1,10 @@
 set global innodb_file_format="Barracuda";
+Warnings:
+Warning	131	Using innodb_file_format is deprecated and the parameter may be removed in future releases. See http://dev.mysql.com/doc/refman/5.7/en/innodb-file-format.html
 set global innodb_file_per_table=1;
 set global innodb_large_prefix=1;
+Warnings:
+Warning	131	Using innodb_large_prefix is deprecated and the parameter may be removed in future releases. See http://dev.mysql.com/doc/refman/5.7/en/innodb-file-format.html
 DROP TABLE IF EXISTS worklog5743;
 CREATE TABLE worklog5743 (
 col_1_text TEXT(4000) , col_2_text TEXT(4000) ,
@@ -11,7 +15,7 @@ SELECT col_1_text = REPEAT("a", 3500) , col_2_text  = REPEAT("o", 3500) FROM
 worklog5743;
 col_1_text = REPEAT("a", 3500)	col_2_text  = REPEAT("o", 3500)
 1	1
-"In connection 1"
+connect  con1,localhost,root,,;
 SELECT col_1_text = REPEAT("a", 3500) , col_2_text = REPEAT("o", 3500) FROM
 worklog5743;
 col_1_text = REPEAT("a", 3500)	col_2_text = REPEAT("o", 3500)
@@ -19,10 +23,10 @@ col_1_text = REPEAT("a", 3500)	col_2_text = REPEAT("o", 3500)
 SELECT COUNT(*) FROM worklog5743;
 COUNT(*)
 1
-"In connection 2"
+connect  con2,localhost,root,,;
 START TRANSACTION;
 INSERT INTO worklog5743 VALUES(REPEAT("b", 3500) , REPEAT("o", 3500));
-"In connection 1"
+connection con1;
 SELECT col_1_text = REPEAT("a", 3500) , col_2_text = REPEAT("o", 3500) FROM
 worklog5743;
 col_1_text = REPEAT("a", 3500)	col_2_text = REPEAT("o", 3500)
@@ -31,7 +35,7 @@ SELECT COUNT(*) FROM worklog5743;
 COUNT(*)
 1
 START TRANSACTION;
-"In connection default ....restarting the server"
+connection default;
 SELECT COUNT(*) FROM worklog5743;
 COUNT(*)
 1
@@ -39,7 +43,9 @@ SELECT col_1_text = REPEAT("a", 3500) , col_2_text  = REPEAT("o", 3500) FROM
 worklog5743;
 col_1_text = REPEAT("a", 3500)	col_2_text  = REPEAT("o", 3500)
 1	1
-"In connection 1"
+disconnect con1;
+disconnect con2;
+connect  con1,localhost,root,,;
 SELECT col_1_text = REPEAT("a", 3500) , col_2_text = REPEAT("o", 3500) FROM
 worklog5743;
 col_1_text = REPEAT("a", 3500)	col_2_text = REPEAT("o", 3500)
@@ -54,7 +60,7 @@ SELECT col_1_text = REPEAT("a", 3500) , col_2_text = REPEAT("o", 3500) FROM
 worklog5743;
 col_1_text = REPEAT("a", 3500)	col_2_text = REPEAT("o", 3500)
 1	1
-"In connection default ....restarting the server"
+connection default;
 SELECT COUNT(*) FROM worklog5743;
 COUNT(*)
 1
@@ -62,7 +68,8 @@ SELECT col_1_text = REPEAT("a", 3500) , col_2_text  = REPEAT("o", 3500) FROM
 worklog5743;
 col_1_text = REPEAT("a", 3500)	col_2_text  = REPEAT("o", 3500)
 1	1
-"In connection 1"
+disconnect con1;
+connect  con2,localhost,root,,;
 SELECT col_1_text = REPEAT("a", 3500) , col_2_text = REPEAT("o", 3500) FROM
 worklog5743;
 col_1_text = REPEAT("a", 3500)	col_2_text = REPEAT("o", 3500)
@@ -76,7 +83,7 @@ SELECT col_1_text = REPEAT("b", 3500) , col_2_text = REPEAT("o", 3500) FROM
 worklog5743;
 col_1_text = REPEAT("b", 3500)	col_2_text = REPEAT("o", 3500)
 1	1
-"In connection default ....restarting the server"
+connection default;
 SELECT COUNT(*) FROM worklog5743;
 COUNT(*)
 1
@@ -85,6 +92,10 @@ worklog5743;
 col_1_text = REPEAT("a", 3500)	col_2_text  = REPEAT("o", 3500)
 1	1
 DROP TABLE worklog5743;
-SET GLOBAL innodb_file_format=Antelope;
+SET GLOBAL innodb_file_format=Barracuda;
+Warnings:
+Warning	131	Using innodb_file_format is deprecated and the parameter may be removed in future releases. See http://dev.mysql.com/doc/refman/5.7/en/innodb-file-format.html
 SET GLOBAL innodb_file_per_table=1;
-SET GLOBAL innodb_large_prefix=0;
+SET GLOBAL innodb_large_prefix=1;
+Warnings:
+Warning	131	Using innodb_large_prefix is deprecated and the parameter may be removed in future releases. See http://dev.mysql.com/doc/refman/5.7/en/innodb-file-format.html

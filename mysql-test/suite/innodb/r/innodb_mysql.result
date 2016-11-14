@@ -1,5 +1,9 @@
 set global innodb_support_xa=default;
+Warnings:
+Warning	131	Using innodb_support_xa is deprecated and the parameter may be removed in future releases.
 set session innodb_support_xa=default;
+Warnings:
+Warning	131	Using innodb_support_xa is deprecated and the parameter may be removed in future releases.
 SET SESSION DEFAULT_STORAGE_ENGINE = InnoDB;
 drop table if exists t1,t2,t3,t1m,t1i,t2m,t2i,t4;
 drop procedure if exists p1;
@@ -109,12 +113,19 @@ id1
 2
 DROP TABLE t1, t2;
 create table t1 (c1 int) engine=innodb;
+connect  con1,localhost,root,,;
+connect  con2,localhost,root,,;
+connection con2;
 handler t1 open;
 handler t1 read first;
 c1
+disconnect con2;
+connection con1;
 Before and after comparison
 0
+connection default;
 drop table t1;
+disconnect con1;
 CREATE TABLE t1(c1 TEXT, UNIQUE (c1(1)), cnt INT DEFAULT 1)
 ENGINE=INNODB CHARACTER SET UTF8;
 INSERT INTO t1 (c1) VALUES ('1a');
@@ -399,12 +410,16 @@ innodb_rollback_on_timeout	OFF
 create table t1 (a int unsigned not null primary key) engine = innodb;
 insert into t1 values (1);
 commit;
+connect  con1,localhost,root,,;
+connect  con2,localhost,root,,;
+connection con2;
 begin work;
 insert into t1 values (2);
 select * from t1;
 a
 1
 2
+connection con1;
 begin work;
 insert into t1 values (5);
 select * from t1;
@@ -418,21 +433,27 @@ a
 1
 5
 commit;
+connection con2;
 select * from t1;
 a
 1
 2
 commit;
+connection default;
 select * from t1;
 a
 1
 2
 5
 drop table t1;
+disconnect con1;
+disconnect con2;
 set @save_qcache_size=@@global.query_cache_size;
 set @save_qcache_type=@@global.query_cache_type;
 set global query_cache_size=10*1024*1024;
 set global query_cache_type=1;
+connect  con1,localhost,root,,;
+connection con1;
 drop table if exists `test`;
 Warnings:
 Note	1051	Unknown table 'test.test'
@@ -440,6 +461,9 @@ CREATE TABLE `test` (`test1` varchar(3) NOT NULL,
 `test2` varchar(4) NOT NULL,PRIMARY KEY  (`test1`))
 ENGINE=InnoDB DEFAULT CHARSET=latin1;
 INSERT INTO `test` (`test1`, `test2`) VALUES ('tes', '5678');
+disconnect con1;
+connect  con2,localhost,root,,;
+connection con2;
 select * from test;
 test1	test2
 tes	5678
@@ -452,6 +476,8 @@ flush tables;
 select * from test;
 test1	test2
 tes	1234
+disconnect con2;
+connection default;
 drop table test;
 set global query_cache_type=@save_qcache_type;
 set global query_cache_size=@save_qcache_size;
@@ -462,12 +488,16 @@ innodb_rollback_on_timeout	OFF
 create table t1 (a int unsigned not null primary key) engine = innodb;
 insert into t1 values (1);
 commit;
+connect  con1,localhost,root,,;
+connect  con2,localhost,root,,;
+connection con2;
 begin work;
 insert into t1 values (2);
 select * from t1;
 a
 1
 2
+connection con1;
 begin work;
 insert into t1 values (5);
 select * from t1;
@@ -481,17 +511,21 @@ a
 1
 5
 commit;
+connection con2;
 select * from t1;
 a
 1
 2
 commit;
+connection default;
 select * from t1;
 a
 1
 2
 5
 drop table t1;
+disconnect con1;
+disconnect con2;
 create table t1(
 id int auto_increment,
 c char(1) not null,
@@ -637,18 +671,22 @@ Warnings:
 Warning	1932	Table 'test.bug29807' doesn't exist in engine
 CREATE TABLE t1 (a INT) ENGINE=InnoDB;
 CREATE TABLE t2 (a INT) ENGINE=InnoDB;
-switch to connection c1
+CONNECT  c1,localhost,root,,;
+CONNECT  c2,localhost,root,,;
+connection c1;
 SET AUTOCOMMIT=0;
 INSERT INTO t2 VALUES (1);
-switch to connection c2
+connection c2;
 SET AUTOCOMMIT=0;
 LOCK TABLES t1 READ, t2 READ;
 ERROR HY000: Lock wait timeout exceeded; try restarting transaction
-switch to connection c1
+connection c1;
 COMMIT;
 INSERT INTO t1 VALUES (1);
-switch to connection default
+connection default;
 SET AUTOCOMMIT=default;
+disconnect c1;
+disconnect c2;
 DROP TABLE t1,t2;
 CREATE TABLE t1 (
 id int NOT NULL auto_increment PRIMARY KEY,
@@ -790,12 +828,16 @@ innodb_rollback_on_timeout	OFF
 create table t1 (a int unsigned not null primary key) engine = innodb;
 insert into t1 values (1);
 commit;
+connect  con1,localhost,root,,;
+connect  con2,localhost,root,,;
+connection con2;
 begin work;
 insert into t1 values (2);
 select * from t1;
 a
 1
 2
+connection con1;
 begin work;
 insert into t1 values (5);
 select * from t1;
@@ -809,17 +851,21 @@ a
 1
 5
 commit;
+connection con2;
 select * from t1;
 a
 1
 2
 commit;
+connection default;
 select * from t1;
 a
 1
 2
 5
 drop table t1;
+disconnect con1;
+disconnect con2;
 drop table if exists t1;
 create table t1 (a int) engine=innodb;
 alter table t1 alter a set default 1;
@@ -1117,9 +1163,19 @@ SELECT COUNT(*) INTO cnt FROM t1 LOCK IN SHARE MODE;
 END WHILE;
 COMMIT;
 END;|
+CONNECT  con1,localhost,root,,;
+CONNECT  con2,localhost,root,,;
+connection con1;
 CALL p1();
+connection con2;
 CALL p1();
+connection default;
 CALL p1();
+connection con1;
+connection con2;
+connection default;
+disconnect con1;
+disconnect con2;
 DROP PROCEDURE p1;
 DROP TABLE t1;
 create table t1(a text) engine=innodb default charset=utf8;
@@ -1130,7 +1186,7 @@ Warning	1071	Specified key was too long; max key length is 767 bytes
 show create table t1;
 Table	Create Table
 t1	CREATE TABLE `t1` (
-  `a` text,
+  `a` text DEFAULT NULL,
   KEY `a` (`a`(255))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8
 drop table t1;
@@ -1144,12 +1200,15 @@ START TRANSACTION;
 SELECT * FROM t1 WHERE b=20 FOR UPDATE;
 a	b
 2	20
+connect  conn2, localhost, root,,test;
 START TRANSACTION;
 SELECT * FROM t1 WHERE b=10 ORDER BY A FOR UPDATE;
 a	b
 1	10
 2	10
 ROLLBACK;
+disconnect conn2;
+connection default;
 ROLLBACK;
 DROP TABLE t1;
 CREATE TABLE t1(
@@ -1574,10 +1633,12 @@ select if(@a=@b,"ok","wrong");
 if(@a=@b,"ok","wrong")
 ok
 drop table t1;
+connect  con1,localhost,root,,;
+connect  con2,localhost,root,,;
 SET SESSION AUTOCOMMIT = 0;
 SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED;
 set binlog_format=mixed;
-# Switch to connection con1
+connection con1;
 CREATE TABLE t1 (a INT PRIMARY KEY, b VARCHAR(256))
 ENGINE = InnoDB;
 INSERT INTO t1 VALUES (1,2);
@@ -1589,17 +1650,17 @@ info: Rows matched: 1  Changed: 1  Warnings: 0
 SELECT * FROM t1;
 a	b
 1	12
-# Switch to connection con2
+connection con2;
 UPDATE t1 SET b = 21 WHERE a = 1;
 ERROR HY000: Lock wait timeout exceeded; try restarting transaction
-# Switch to connection con1
+connection con1;
 SELECT * FROM t1;
 a	b
 1	12
 ROLLBACK;
-# Switch to connection con2
+connection con2;
 ROLLBACK;
-# Switch to connection con1
+connection con1;
 # 2. test for serialized update:
 CREATE TABLE t2 (a INT);
 TRUNCATE t1;
@@ -1626,9 +1687,9 @@ info: Rows matched: 1  Changed: 1  Warnings: 0
 SELECT * FROM t1;
 a	b
 1	init+con1
-# Switch to connection con2
+connection con2;
 CALL p1;;
-# Switch to connection con1
+connection con1;
 SELECT * FROM t1;
 a	b
 1	init+con1
@@ -1636,12 +1697,12 @@ COMMIT;
 SELECT * FROM t1;
 a	b
 1	init+con1
-# Switch to connection con2
+connection con2;
 SELECT * FROM t1;
 a	b
 1	init+con1+con2
 COMMIT;
-# Switch to connection con1
+connection con1;
 # 3. test for updated key column:
 TRUNCATE t1;
 TRUNCATE t2;
@@ -1653,9 +1714,9 @@ info: Rows matched: 1  Changed: 1  Warnings: 0
 SELECT * FROM t1;
 a	b
 2	init+con1
-# Switch to connection con2
+connection con2;
 CALL p1;;
-# Switch to connection con1
+connection con1;
 SELECT * FROM t1;
 a	b
 2	init+con1
@@ -1663,10 +1724,13 @@ COMMIT;
 SELECT * FROM t1;
 a	b
 2	init+con1
-# Switch to connection con2
+connection con2;
 SELECT * FROM t1;
 a	b
 2	init+con1
+connection default;
+disconnect con1;
+disconnect con2;
 DROP PROCEDURE p1;
 DROP TABLE t1, t2;
 CREATE TABLE t1 (a INT NOT NULL, b INT NOT NULL, PRIMARY KEY (a,b)) engine=innodb;
@@ -1826,21 +1890,21 @@ a
 1
 2
 3
-# Connection con1
+connect  con1, localhost, root,,;
 TRUNCATE TABLE t1;;
-# Connection default
+connection default;
 SELECT * FROM t1 ORDER BY a;
 a
 1
 2
 3
 ROLLBACK;
-# Connection con1
+connection con1;
 # Reaping TRUNCATE TABLE
 SELECT * FROM t1;
 a
-# Disconnect con1
-# Connection default
+disconnect con1;
+connection default;
 DROP TABLE t1;
 drop table if exists t1, t2, t3;
 #
@@ -2370,6 +2434,8 @@ INSERT INTO t1 VALUES (),();
 INSERT INTO t2 VALUES (),();
 CREATE OR REPLACE VIEW v1 AS SELECT 1 FROM t2 
 WHERE b =(SELECT a FROM t1 LIMIT 1);
+CONNECT  con1, localhost, root,,;
+connection default;
 CREATE PROCEDURE p1(num INT)
 BEGIN
 DECLARE i INT DEFAULT 0;
@@ -2380,6 +2446,7 @@ UNTIL i>num END REPEAT;
 END|
 # Should not crash
 # Should not crash
+disconnect con1;
 DROP PROCEDURE p1;
 DROP VIEW v1;
 DROP TABLE t1,t2;
@@ -2774,19 +2841,18 @@ CREATE TABLE t1(x INT PRIMARY KEY, y INT) ENGINE=innodb;
 INSERT INTO t1 VALUES (1, 0), (2, 0);
 CREATE FUNCTION f1(z INT) RETURNS INT READS SQL DATA
 RETURN (SELECT x FROM t1 WHERE x = z);
-# Connection default
 START TRANSACTION;
 SELECT f1(1);
 f1(1)
 1
-# Connection con2
 START TRANSACTION;
 SELECT f1(1);
 f1(1)
 1
 UPDATE t1 SET y = 1 WHERE x = 1;
 COMMIT;
-# Connection default
+disconnect con2;
+connection default;
 COMMIT;
 DROP TABLE t1;
 DROP FUNCTION f1;

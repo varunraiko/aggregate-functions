@@ -20,7 +20,7 @@
 #include <m_ctype.h>
 /* Windows version of localtime_r() is declared in my_ptrhead.h */
 #include <my_pthread.h>
-#include <mysqld_error.h>
+
 
 ulonglong log_10_int[20]=
 {
@@ -224,7 +224,7 @@ my_bool check_datetime_range(const MYSQL_TIME *ltime)
     ltime->minute > 59 || ltime->second > 59 ||
     ltime->second_part > TIME_MAX_SECOND_PART ||
     (ltime->hour >
-     (ltime->time_type == MYSQL_TIMESTAMP_TIME ? TIME_MAX_HOUR : 23));
+     (uint) (ltime->time_type == MYSQL_TIMESTAMP_TIME ? TIME_MAX_HOUR : 23));
 }
 
 
@@ -237,7 +237,7 @@ static void get_microseconds(ulong *val, MYSQL_TIME_STATUS *status,
   if (get_digits(&tmp, number_of_fields, str, end, 6))
     status->warnings|= MYSQL_TIME_WARN_TRUNCATED;
   if ((status->precision= (*str - start)) < 6)
-    *val= tmp * log_10_int[6 - (*str - start)];
+    *val= (ulong) (tmp * log_10_int[6 - (*str - start)]);
   else
     *val= tmp;
   if (skip_digits(str, end))
@@ -776,7 +776,6 @@ long calc_daynr(uint year,uint month,uint day)
   DBUG_ASSERT(delsum+(int) y/4-temp >= 0);
   DBUG_RETURN(delsum+(int) y/4-temp);
 } /* calc_daynr */
-
 
 /*
   Convert time in MYSQL_TIME representation in system time zone to its

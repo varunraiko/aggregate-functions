@@ -114,12 +114,11 @@
 #include "sql_parse.h"                          // check_stack_overrun
 #include "sql_partition.h"    // get_part_id_func, PARTITION_ITERATOR,
                               // struct partition_info, NOT_A_PARTITION_ID
-#include "sql_base.h"         // free_io_cache
 #include "records.h"          // init_read_record, end_read_record
 #include <m_ctype.h>
 #include "sql_select.h"
 #include "sql_statistics.h"
-#include "filesort.h"         // filesort_free_buffers
+#include "uniques.h"
 
 #ifndef EXTRA_DEBUG
 #define test_rb_tree(A,B) {}
@@ -1165,6 +1164,7 @@ int imerge_list_and_tree(RANGE_OPT_PARAM *param,
 
 SQL_SELECT *make_select(TABLE *head, table_map const_tables,
 			table_map read_tables, COND *conds,
+                        SORT_INFO *filesort,
                         bool allow_null_cond,
                         int *error)
 {
@@ -1185,13 +1185,16 @@ SQL_SELECT *make_select(TABLE *head, table_map const_tables,
   select->head=head;
   select->cond= conds;
 
-  if (head->sort.io_cache)
+  if (filesort && my_b_inited(&filesort->io_cache))
   {
-    select->file= *head->sort.io_cache;
+    /*
+      Hijack the filesort io_cache for make_select
+      SQL_SELECT will be responsible for ensuring that it's properly freed.
+    */
+    select->file= filesort->io_cache;
     select->records=(ha_rows) (select->file.end_of_file/
 			       head->file->ref_length);
-    my_free(head->sort.io_cache);
-    head->sort.io_cache=0;
+    my_b_clear(&filesort->io_cache);
   }
   DBUG_RETURN(select);
 }
@@ -1404,7 +1407,6 @@ QUICK_INDEX_SORT_SELECT::~QUICK_INDEX_SORT_SELECT()
   delete pk_quick_select;
   /* It's ok to call the next two even if they are already deinitialized */
   end_read_record(&read_record);
-  free_io_cache(head);
   free_root(&alloc,MYF(0));
   DBUG_VOID_RETURN;
 }
@@ -1542,7 +1544,7 @@ end:
   if (!head->no_keyread)
   {
     doing_key_read= 1;
-    head->enable_keyread();
+    head->set_keyread(true);
   }
 
   head->prepare_for_position();
@@ -2426,8 +2428,6 @@ int SQL_SELECT::test_quick_select(THD *thd, key_map keys_to_use,
     scan_time= read_time= DBL_MAX;
   if (limit < records)
     read_time= (double) records + scan_time + 1; // Force to use index
-  else if (read_time <= 2.0 && !force_quick_range)
-    DBUG_RETURN(0);				/* No need for quick select */
   
   possible_keys.clear_all();
 
@@ -2696,7 +2696,6 @@ int SQL_SELECT::test_quick_select(THD *thd, key_map keys_to_use,
     thd->mem_root= param.old_root;
     thd->no_errors=0;
   }
-
 
   DBUG_EXECUTE("info", print_quick(quick, &needed_reg););
 
@@ -3130,8 +3129,7 @@ bool calculate_cond_selectivity_for_table(THD *thd, TABLE *table, Item **cond)
       DBUG_RETURN(TRUE);
     dt->list.empty();
     dt->table= table;
-    if ((*cond)->walk(&Item::find_selective_predicates_list_processor, 0,
-                      (uchar*) dt))
+    if ((*cond)->walk(&Item::find_selective_predicates_list_processor, 0, dt))
       DBUG_RETURN(TRUE);
     if (dt->list.elements > 0)
     {
@@ -10376,8 +10374,10 @@ get_quick_keys(PARAM *param,QUICK_RANGE_SELECT *quick,KEY_PART *key,
       KEY *table_key=quick->head->key_info+quick->index;
       flag=EQ_RANGE;
       if ((table_key->flags & HA_NOSAME) &&
+          min_part == key_tree->part &&
           key_tree->part == table_key->user_defined_key_parts-1)
       {
+        DBUG_ASSERT(min_part == max_part);
         if ((table_key->flags & HA_NULL_PART_KEY) &&
             null_part_in_key(key,
                              param->min_key,
@@ -10679,7 +10679,7 @@ int read_keys_and_merge_scans(THD *thd,
   if (!head->key_read)
   {
     enabled_keyread= 1;
-    head->enable_keyread();
+    head->set_keyread(true);
   }
   head->prepare_for_position();
 
@@ -10712,7 +10712,6 @@ int read_keys_and_merge_scans(THD *thd,
   else
   {
     unique->reset();
-    filesort_free_buffers(head, false);
   }
 
   DBUG_ASSERT(file->ref_length == unique->get_size());
@@ -10765,7 +10764,7 @@ int read_keys_and_merge_scans(THD *thd,
 
   /*
     Ok all rowids are in the Unique now. The next call will initialize
-    head->sort structure so it can be used to iterate through the rowids
+    the unique structure so it can be used to iterate through the rowids
     sequence.
   */
   result= unique->get(head);
@@ -10773,14 +10772,15 @@ int read_keys_and_merge_scans(THD *thd,
     index merge currently doesn't support "using index" at all
   */
   if (enabled_keyread)
-    head->disable_keyread();
-  if (init_read_record(read_record, thd, head, (SQL_SELECT*) 0, 1 , 1, TRUE))
+    head->set_keyread(false);
+  if (init_read_record(read_record, thd, head, (SQL_SELECT*) 0,
+                       &unique->sort, 1 , 1, TRUE))
     result= 1;
  DBUG_RETURN(result);
 
 err:
   if (enabled_keyread)
-    head->disable_keyread();
+    head->set_keyread(false);
   DBUG_RETURN(1);
 }
 
@@ -10817,7 +10817,8 @@ int QUICK_INDEX_MERGE_SELECT::get_next()
   {
     result= HA_ERR_END_OF_FILE;
     end_read_record(&read_record);
-    free_io_cache(head);
+    // Free things used by sort early. Shouldn't be strictly necessary
+    unique->sort.reset();
     /* All rows from Unique have been retrieved, do a clustered PK scan */
     if (pk_quick_select)
     {
@@ -10852,7 +10853,7 @@ int QUICK_INDEX_INTERSECT_SELECT::get_next()
   {
     result= HA_ERR_END_OF_FILE;
     end_read_record(&read_record);
-    free_io_cache(head);
+    unique->sort.reset();                       // Free things early
   }
 
   DBUG_RETURN(result);
@@ -12104,9 +12105,6 @@ get_best_group_min_max(PARAM *param, SEL_TREE *tree, double read_time)
     DBUG_RETURN(NULL); /* Cannot execute with correlated conditions. */
 
   /* Check (SA1,SA4) and store the only MIN/MAX argument - the C attribute.*/
-  if (join->make_sum_func_list(join->all_fields, join->fields_list, 1))
-    DBUG_RETURN(NULL);
-
   List_iterator<Item> select_items_it(join->fields_list);
   is_agg_distinct = is_indexed_agg_distinct(join, &agg_distinct_flds);
 
@@ -12434,7 +12432,7 @@ get_best_group_min_max(PARAM *param, SEL_TREE *tree, double read_time)
 
         /* Check if cur_part is referenced in the WHERE clause. */
         if (join->conds->walk(&Item::find_item_in_field_list_processor, 0,
-                              (uchar*) key_part_range))
+                              key_part_range))
           goto next_index;
       }
     }
@@ -13455,7 +13453,7 @@ QUICK_GROUP_MIN_MAX_SELECT::~QUICK_GROUP_MIN_MAX_SELECT()
   {
     DBUG_ASSERT(file == head->file);
     if (doing_key_read)
-      head->disable_keyread();
+      head->set_keyread(false);
     /*
       There may be a code path when the same table was first accessed by index,
       then the index is closed, and the table is scanned (order by + loose scan).
@@ -13648,7 +13646,7 @@ int QUICK_GROUP_MIN_MAX_SELECT::reset(void)
   if (!head->key_read)
   {
     doing_key_read= 1;
-    head->enable_keyread(); /* We need only the key attributes */
+    head->set_keyread(true); /* We need only the key attributes */
   }
   if ((result= file->ha_index_init(index,1)))
   {
@@ -13906,7 +13904,7 @@ int QUICK_GROUP_MIN_MAX_SELECT::next_max()
     SELECT [SUM|COUNT|AVG](DISTINCT a,...) FROM t
   This method comes to replace the index scan + Unique class 
   (distinct selection) for loose index scan that visits all the rows of a 
-  covering index instead of jumping in the begining of each group.
+  covering index instead of jumping in the beginning of each group.
   TODO: Placeholder function. To be replaced by a handler API call
 
   @param is_index_scan     hint to use index scan instead of random index read 
@@ -14616,6 +14614,4 @@ void QUICK_GROUP_MIN_MAX_SELECT::dbug_dump(int indent, bool verbose)
   }
 }
 
-
 #endif /* !DBUG_OFF */
-

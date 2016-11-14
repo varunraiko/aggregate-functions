@@ -47,9 +47,7 @@ rpt_handle_event(rpl_parallel_thread::queued_event *qev,
   if (!(ev->is_artificial_event() || ev->is_relay_log_event() ||
         (ev->when == 0)))
     rgi->last_master_timestamp= ev->when + (time_t)ev->exec_time;
-  mysql_mutex_lock(&rli->data_lock);
-  /* Mutex will be released in apply_event_and_update_pos(). */
-  err= apply_event_and_update_pos(ev, thd, rgi, rpt);
+  err= apply_event_and_update_pos_for_parallel(ev, thd, rgi);
 
   thread_safe_increment64(&rli->executed_entries);
   /* ToDo: error handling. */
@@ -104,6 +102,25 @@ handle_queued_pos_update(THD *thd, rpl_parallel_thread::queued_event *qev)
     rli->group_master_log_pos= qev->future_event_master_log_pos;
   mysql_mutex_unlock(&rli->data_lock);
   mysql_cond_broadcast(&rli->data_cond);
+}
+
+
+/*
+  Wait for any pending deadlock kills. Since deadlock kills happen
+  asynchronously, we need to be sure they will be completed before starting a
+  new transaction. Otherwise the new transaction might suffer a spurious kill.
+*/
+static void
+wait_for_pending_deadlock_kill(THD *thd, rpl_group_info *rgi)
+{
+  PSI_stage_info old_stage;
+
+  mysql_mutex_lock(&thd->LOCK_wakeup_ready);
+  thd->ENTER_COND(&thd->COND_wakeup_ready, &thd->LOCK_wakeup_ready,
+                  &stage_waiting_for_deadlock_kill, &old_stage);
+  while (rgi->killed_for_retry == rpl_group_info::RETRY_KILL_PENDING)
+    mysql_cond_wait(&thd->COND_wakeup_ready, &thd->LOCK_wakeup_ready);
+  thd->EXIT_COND(&old_stage);
 }
 
 
@@ -212,6 +229,8 @@ finish_event_group(rpl_parallel_thread *rpt, uint64 sub_id,
     entry->stop_on_error_sub_id= sub_id;
   mysql_mutex_unlock(&entry->LOCK_parallel_entry);
 
+  if (rgi->killed_for_retry == rpl_group_info::RETRY_KILL_PENDING)
+    wait_for_pending_deadlock_kill(thd, rgi);
   thd->clear_error();
   thd->reset_killed();
   /*
@@ -307,6 +326,7 @@ do_gco_wait(rpl_group_info *rgi, group_commit_orderer *gco,
                     &stage_waiting_for_prior_transaction_to_start_commit,
                     old_stage);
     *did_enter_cond= true;
+    thd->set_time_for_next_stage();
     do
     {
       if (thd->check_killed() && !rgi->worker_error)
@@ -369,6 +389,7 @@ do_ftwrl_wait(rpl_group_info *rgi,
     thd->ENTER_COND(&entry->COND_parallel_entry, &entry->LOCK_parallel_entry,
                     &stage_waiting_for_ftwrl, old_stage);
     *did_enter_cond= true;
+    thd->set_time_for_next_stage();
     do
     {
       if (entry->force_abort || rgi->worker_error)
@@ -417,8 +438,11 @@ pool_mark_busy(rpl_parallel_thread_pool *pool, THD *thd)
   */
   mysql_mutex_lock(&pool->LOCK_rpl_thread_pool);
   if (thd)
+  {
     thd->ENTER_COND(&pool->COND_rpl_thread_pool, &pool->LOCK_rpl_thread_pool,
                     &stage_waiting_for_rpl_thread_pool, &old_stage);
+    thd->set_time_for_next_stage();
+  }
   while (pool->busy)
   {
     if (thd && thd->check_killed())
@@ -534,6 +558,7 @@ rpl_pause_for_ftwrl(THD *thd)
       e->pause_sub_id= e->largest_started_sub_id;
     thd->ENTER_COND(&e->COND_parallel_entry, &e->LOCK_parallel_entry,
                     &stage_waiting_for_ftwrl_threads_to_pause, &old_stage);
+    thd->set_time_for_next_stage();
     while (e->pause_sub_id < (uint64)ULONGLONG_MAX &&
            e->last_committed_sub_id < e->pause_sub_id &&
            !err)
@@ -604,7 +629,6 @@ convert_kill_to_deadlock_error(rpl_group_info *rgi)
   {
     thd->clear_error();
     my_error(ER_LOCK_DEADLOCK, MYF(0));
-    rgi->killed_for_retry= false;
     thd->reset_killed();
   }
 }
@@ -621,7 +645,7 @@ is_group_ending(Log_event *ev, Log_event_type event_type)
 {
   if (event_type == XID_EVENT)
     return 1;
-  if (event_type == QUERY_EVENT)
+  if (event_type == QUERY_EVENT)  // COMMIT/ROLLBACK are never compressed
   {
     Query_log_event *qev = (Query_log_event *)ev;
     if (qev->is_commit())
@@ -695,14 +719,16 @@ do_retry:
     thd->wait_for_commit_ptr->unregister_wait_for_prior_commit();
   DBUG_EXECUTE_IF("inject_mdev8031", {
       /* Simulate that we get deadlock killed at this exact point. */
-      rgi->killed_for_retry= true;
+      rgi->killed_for_retry= rpl_group_info::RETRY_KILL_KILLED;
       mysql_mutex_lock(&thd->LOCK_thd_data);
       thd->killed= KILL_CONNECTION;
       mysql_mutex_unlock(&thd->LOCK_thd_data);
   });
   rgi->cleanup_context(thd, 1);
+  wait_for_pending_deadlock_kill(thd, rgi);
   thd->reset_killed();
   thd->clear_error();
+  rgi->killed_for_retry = rpl_group_info::RETRY_KILL_NONE;
 
   /*
     If we retry due to a deadlock kill that occurred during the commit step, we
@@ -841,7 +867,7 @@ do_retry:
           {
             /* Simulate that we get deadlock killed during open_binlog(). */
             thd->reset_for_next_command();
-            rgi->killed_for_retry= true;
+            rgi->killed_for_retry= rpl_group_info::RETRY_KILL_KILLED;
             mysql_mutex_lock(&thd->LOCK_thd_data);
             thd->killed= KILL_CONNECTION;
             mysql_mutex_unlock(&thd->LOCK_thd_data);
@@ -967,12 +993,9 @@ handle_rpl_parallel_thread(void *arg)
   struct rpl_parallel_thread *rpt= (struct rpl_parallel_thread *)arg;
 
   my_thread_init();
-  thd = new THD;
+  thd = new THD(next_thread_id());
   thd->thread_stack = (char*)&thd;
-  mysql_mutex_lock(&LOCK_thread_count);
-  thd->thread_id= thd->variables.pseudo_thread_id= thread_id++;
-  threads.append(thd);
-  mysql_mutex_unlock(&LOCK_thread_count);
+  add_to_active_threads(thd);
   set_current_thd(thd);
   pthread_detach_this_thread();
   thd->init_for_queries();
@@ -989,7 +1012,6 @@ handle_rpl_parallel_thread(void *arg)
   thd->client_capabilities = CLIENT_LOCAL_FILES;
   thd->net.reading_or_writing= 0;
   thd_proc_info(thd, "Waiting for work from main SQL threads");
-  thd->set_time();
   thd->variables.lock_wait_timeout= LONG_TIMEOUT;
   thd->system_thread_info.rpl_sql_info= &sql_info;
   /*
@@ -998,7 +1020,6 @@ handle_rpl_parallel_thread(void *arg)
     for statement-based replication.
   */
   thd->variables.tx_isolation= ISO_REPEATABLE_READ;
-
 
   mysql_mutex_lock(&rpt->LOCK_rpl_thread);
   rpt->thd= thd;
@@ -1009,8 +1030,10 @@ handle_rpl_parallel_thread(void *arg)
   rpt->running= true;
   mysql_cond_signal(&rpt->COND_rpl_thread);
 
+  thd->set_command(COM_SLAVE_WORKER);
   while (!rpt->stop)
   {
+    uint wait_count= 0;
     rpl_parallel_thread::queued_event *qev, *next_qev;
 
     thd->ENTER_COND(&rpt->COND_rpl_thread, &rpt->LOCK_rpl_thread,
@@ -1029,7 +1052,11 @@ handle_rpl_parallel_thread(void *arg)
               (rpt->current_owner && !in_event_group) ||
               (rpt->current_owner && group_rgi->parallel_entry->force_abort) ||
               rpt->stop))
+    {
+      if (!wait_count++)
+        thd->set_time_for_next_stage();
       mysql_cond_wait(&rpt->COND_rpl_thread, &rpt->LOCK_rpl_thread);
+    }
     rpt->dequeue1(events);
     thd->EXIT_COND(&old_stage);
 
@@ -1373,9 +1400,8 @@ handle_rpl_parallel_thread(void *arg)
   thd_proc_info(thd, "Slave worker thread exiting");
   thd->temporary_tables= 0;
 
-  mysql_mutex_lock(&LOCK_thread_count);
-  thd->unlink();
-  mysql_mutex_unlock(&LOCK_thread_count);
+  THD_CHECK_SENTRY(thd);
+  unlink_not_visible_thd(thd);
   delete thd;
 
   mysql_mutex_lock(&rpt->LOCK_rpl_thread);
@@ -1741,7 +1767,7 @@ rpl_parallel_thread::get_rgi(Relay_log_info *rli, Gtid_log_event *gtid_ev,
   rgi->relay_log= rli->last_inuse_relaylog;
   rgi->retry_start_offset= rli->future_event_relay_log_pos-event_size;
   rgi->retry_event_count= 0;
-  rgi->killed_for_retry= false;
+  rgi->killed_for_retry= rpl_group_info::RETRY_KILL_NONE;
 
   return rgi;
 }
@@ -2398,8 +2424,17 @@ rpl_parallel::do_event(rpl_group_info *serial_rgi, Log_event *ev,
       !(unlikely(rli->gtid_skip_flag != GTID_SKIP_NOT) && is_group_event))
     return -1;
 
-  /* ToDo: what to do with this lock?!? */
-  mysql_mutex_unlock(&rli->data_lock);
+  /* Note: rli->data_lock is released by sql_delay_event(). */
+  if (sql_delay_event(ev, rli->sql_driver_thd, serial_rgi))
+  {
+    /*
+      If sql_delay_event() returns non-zero, it means that the wait timed out
+      due to slave stop. We should not queue the event in this case, it must
+      not be applied yet.
+    */
+    delete ev;
+    return 1;
+  }
 
   if (unlikely(typ == FORMAT_DESCRIPTION_EVENT))
   {
@@ -2476,7 +2511,7 @@ rpl_parallel::do_event(rpl_group_info *serial_rgi, Log_event *ev,
       {
         DBUG_ASSERT(rli->gtid_skip_flag == GTID_SKIP_TRANSACTION);
         if (typ == XID_EVENT ||
-            (typ == QUERY_EVENT &&
+            (typ == QUERY_EVENT &&  // COMMIT/ROLLBACK are never compressed
              (((Query_log_event *)ev)->is_commit() ||
               ((Query_log_event *)ev)->is_rollback())))
           rli->gtid_skip_flag= GTID_SKIP_NOT;

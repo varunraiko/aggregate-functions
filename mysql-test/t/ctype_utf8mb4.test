@@ -1939,3 +1939,46 @@ DROP FUNCTION f1;
 --echo #
 --echo # End of 10.1 tests
 --echo #
+
+
+--echo #
+--echo # End of 10.2 tests
+--echo #
+
+--echo #
+--echo # MDEV-9842 LOAD DATA INFILE does not work well with a TEXT column when using sjis
+--echo #
+CREATE TABLE t1 (a TEXT CHARACTER SET utf8mb4);
+LOAD DATA INFILE '../../std_data/loaddata/mdev9823.utf8mb4.txt' INTO TABLE t1 CHARACTER SET utf8mb4 IGNORE 4 LINES;
+SELECT HEX(a) FROM t1;
+DROP TABLE t1;
+
+--echo #
+--echo # MDEV-9711 NO PAD Collatons
+--echo #
+let $coll='utf8mb4_general_nopad_ci';
+let $coll_pad='utf8mb4_general_ci';
+--source include/ctype_pad_all_engines.inc
+
+let $coll='utf8mb4_nopad_bin';
+let $coll_pad='utf8mb4_bin';
+--source include/ctype_pad_all_engines.inc
+
+--echo #
+--echo # MDEV-10867 PREPARE..EXECUTE is not consistent about non-ASCII characters
+--echo #
+SET NAMES utf8mb4;
+SELECT '😎' AS c;
+
+SET @src='SELECT ''😎'' AS c';
+PREPARE stmt FROM @src;
+EXECUTE stmt;
+EXECUTE IMMEDIATE @src;
+
+PREPARE stmt FROM 'SELECT ''😎'' AS c';
+EXECUTE stmt;
+EXECUTE IMMEDIATE 'SELECT ''😎'' AS c';
+
+--echo #
+--echo # End of 10.2 tests
+--echo #

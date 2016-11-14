@@ -203,7 +203,8 @@ TABLE *open_proc_table_for_read(THD *thd, Open_tables_backup *backup);
 
 sp_head *
 sp_load_for_information_schema(THD *thd, TABLE *proc_table, String *db,
-                               String *name, ulong sql_mode, stored_procedure_type type,
+                               String *name, sql_mode_t sql_mode,
+                               stored_procedure_type type,
                                const char *returns, const char *params,
                                bool *free_sp_head);
 
@@ -231,5 +232,5 @@ bool show_create_sp(THD *thd, String *buf,
               st_sp_chistics *chistics,
               const LEX_STRING *definer_user,
               const LEX_STRING *definer_host,
-	      ulonglong sql_mode);
+	      sql_mode_t sql_mode);
 #endif /* _SP_H_ */

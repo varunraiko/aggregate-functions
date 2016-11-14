@@ -121,7 +121,7 @@ create table t1 ( min_num   dec(6,6)     default .000001);
 show create table t1;
 Table	Create Table
 t1	CREATE TABLE `t1` (
-  `min_num` decimal(6,6) DEFAULT '0.000001'
+  `min_num` decimal(6,6) DEFAULT 0.000001
 ) ENGINE=MyISAM DEFAULT CHARSET=latin1
 drop table t1 ;
 set session sql_mode = 'IGNORE_SPACE';
@@ -129,14 +129,14 @@ create table t1 ( min_num   dec(6,6)     default 0.000001);
 show create table t1;
 Table	Create Table
 t1	CREATE TABLE `t1` (
-  `min_num` decimal(6,6) DEFAULT '0.000001'
+  `min_num` decimal(6,6) DEFAULT 0.000001
 ) ENGINE=MyISAM DEFAULT CHARSET=latin1
 drop table t1 ;
 create table t1 ( min_num   dec(6,6)     default .000001);
 show create table t1;
 Table	Create Table
 t1	CREATE TABLE `t1` (
-  `min_num` decimal(6,6) DEFAULT '0.000001'
+  `min_num` decimal(6,6) DEFAULT 0.000001
 ) ENGINE=MyISAM DEFAULT CHARSET=latin1
 drop table t1 ;
 set @@SQL_MODE=NULL;
@@ -497,14 +497,19 @@ xcx
 drop table t1;
 SET @@SQL_MODE=@OLD_SQL_MODE;
 create user mysqltest_32753@localhost;
+connection default;
 set @OLD_SQL_MODE=@@SESSION.SQL_MODE;
 set session sql_mode='PAD_CHAR_TO_FULL_LENGTH';
 flush privileges;
+connect  user_32753,localhost,mysqltest_32753,,test,$MASTER_MYPORT,$MASTER_MYSOCK;
 select current_user();
 current_user()
 mysqltest_32753@localhost
+connection default;
 set session sql_mode=@OLD_SQL_MODE;
 flush privileges;
+disconnect user_32753;
+connection default;
 drop user mysqltest_32753@localhost;
 SET @org_mode=@@sql_mode;
 SET @@sql_mode='traditional';

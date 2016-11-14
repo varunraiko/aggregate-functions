@@ -1,0 +1,54 @@
+# vim ft=yaml
+# travis-ci.org definition
+
+# non-container builds don't have enough RAM to reliably compile
+sudo: required
+dist: trusty
+
+language: cpp
+compiler:
+  - gcc
+cache:
+  - apt
+  - ccache
+
+addons:
+  apt:
+    packages: # make sure these match debian/control contents
+      - bison
+      - chrpath
+      - cmake
+      - debhelper
+      - dh-apparmor
+      - dpatch
+      - gdb
+      - libaio-dev
+      - libboost-dev
+      - libjudy-dev
+      - libncurses5-dev
+      - libpam0g-dev
+      - libreadline-gplv2-dev
+      - libssl-dev
+      - libnuma-dev
+      - lsb-release
+      - perl
+      - po-debconf
+      - psmisc
+      - zlib1g-dev
+      - libcrack2-dev
+      - libjemalloc-dev
+      - devscripts # implicit for any build on Ubuntu
+
+script:
+  - ${CC} --version ; ${CXX} --version
+  - cd "${TRAVIS_BUILD_DIR}"
+  - env DEB_BUILD_OPTIONS="parallel=4" debian/autobake-deb.sh;
+
+notifications:
+  irc:
+    channels:
+      - "chat.freenode.net#maria"
+    on_success: never # [always|never|change]
+    on_failure: never
+    template:
+      - "%{repository}/%{branch} (%{commit} - %{author}): %{build_url}: %{message}"

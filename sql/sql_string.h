@@ -32,6 +32,7 @@ class String;
 typedef struct st_io_cache IO_CACHE;
 typedef struct st_mem_root MEM_ROOT;
 
+#include "pack.h"
 int sortcmp(const String *a,const String *b, CHARSET_INFO *cs);
 String *copy_if_not_alloced(String *a,String *b,uint32 arg_length);
 inline uint32 copy_and_convert(char *to, uint32 to_length,
@@ -43,13 +44,48 @@ inline uint32 copy_and_convert(char *to, uint32 to_length,
 }
 
 
-class String_copier: private MY_STRCONV_STATUS
+class String_copy_status: protected MY_STRCOPY_STATUS
 {
 public:
   const char *source_end_pos() const
-  { return m_native_copy_status.m_source_end_pos; }
+  { return m_source_end_pos; }
   const char *well_formed_error_pos() const
-  { return m_native_copy_status.m_well_formed_error_pos; }
+  { return m_well_formed_error_pos; }
+};
+
+
+class Well_formed_prefix_status: public String_copy_status
+{
+public:
+  Well_formed_prefix_status(CHARSET_INFO *cs,
+                            const char *str, const char *end, size_t nchars)
+  { cs->cset->well_formed_char_length(cs, str, end, nchars, this); }
+};
+
+
+class Well_formed_prefix: public Well_formed_prefix_status
+{
+  const char *m_str; // The beginning of the string
+public:
+  Well_formed_prefix(CHARSET_INFO *cs, const char *str, const char *end,
+                     size_t nchars)
+   :Well_formed_prefix_status(cs, str, end, nchars), m_str(str)
+  { }
+  Well_formed_prefix(CHARSET_INFO *cs, const char *str, size_t length,
+                     size_t nchars)
+   :Well_formed_prefix_status(cs, str, str + length, nchars), m_str(str)
+  { }
+  Well_formed_prefix(CHARSET_INFO *cs, const char *str, size_t length)
+   :Well_formed_prefix_status(cs, str, str + length, length), m_str(str)
+  { }
+  size_t length() const { return m_source_end_pos - m_str; }
+};
+
+
+class String_copier: public String_copy_status,
+                     protected MY_STRCONV_STATUS
+{
+public:
   const char *cannot_convert_error_pos() const
   { return m_cannot_convert_error_pos; }
   const char *most_important_error_pos() const
@@ -66,7 +102,7 @@ public:
                    uint nchars)
   {
     return my_convert_fix(dstcs, dst, dst_length,
-                          srccs, src, src_length, nchars, this);
+                          srccs, src, src_length, nchars, this, this);
   }
   /*
      Copy a string. Fix bad bytes/characters to '?'.
@@ -359,7 +395,9 @@ public:
     if (ALIGN_SIZE(arg_length+1) < Alloced_length)
     {
       char *new_ptr;
-      if (!(new_ptr=(char*) my_realloc(Ptr,arg_length,MYF(0))))
+      if (!(new_ptr=(char*)
+            my_realloc(Ptr, arg_length,MYF((thread_specific ?
+                                            MY_THREAD_SPECIFIC : 0)))))
       {
 	Alloced_length = 0;
 	real_alloc(arg_length);
@@ -495,6 +533,11 @@ public:
   {
     Ptr[str_length++] = c;
   }
+  void q_append2b(const uint32 n)
+  {
+    int2store(Ptr + str_length, n);
+    str_length += 2;
+  }
   void q_append(const uint32 n)
   {
     int4store(Ptr + str_length, n);
@@ -559,6 +602,7 @@ public:
     return Ptr+ old_length;			/* Area to use */
   }
 
+
   inline bool append(const char *s, uint32 arg_length, uint32 step_alloc)
   {
     uint32 new_length= arg_length + str_length;
@@ -597,9 +641,7 @@ public:
   }
   uint well_formed_length() const
   {
-    int dummy_error;
-    return charset()->cset->well_formed_len(charset(), ptr(), ptr() + length(),
-                                            length(), &dummy_error);
+    return (uint) Well_formed_prefix(charset(), ptr(), length()).length();
   }
   bool is_ascii() const
   {
@@ -622,6 +664,19 @@ public:
   bool eq(const String *other, CHARSET_INFO *cs) const
   {
     return !sortcmp(this, other, cs);
+  }
+  void q_net_store_length(ulonglong length)
+  {
+    DBUG_ASSERT(Alloced_length >= (str_length + net_length_size(length)));
+    char *pos= (char *) net_store_length((uchar *)(Ptr + str_length), length);
+    str_length= pos - Ptr;
+  }
+  void q_net_store_data(const uchar *from, size_t length)
+  {
+    DBUG_ASSERT(Alloced_length >= (str_length + length +
+                                   net_length_size(length)));
+    q_net_store_length(length);
+    q_append((const char *)from, length);
   }
 };
 

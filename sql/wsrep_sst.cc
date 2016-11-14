@@ -34,14 +34,8 @@ char wsrep_defaults_file[FN_REFLEN * 2 + 10 +
                          sizeof(WSREP_SST_OPT_CONF) +
                          sizeof(WSREP_SST_OPT_EXTRA_CONF)] = {0};
 
-const char* wsrep_sst_method          = WSREP_SST_DEFAULT;
-const char* wsrep_sst_receive_address = WSREP_SST_ADDRESS_AUTO;
-const char* wsrep_sst_donor           = "";
-      char* wsrep_sst_auth            = NULL;
-
 // container for real auth string
 static const char* sst_auth_real      = NULL;
-my_bool wsrep_sst_donor_rejects_queries = FALSE;
 
 bool wsrep_sst_method_check (sys_var *self, THD* thd, set_var* var)
 {
@@ -175,10 +169,9 @@ bool wsrep_sst_auth_update (sys_var *self, THD* thd, enum_var_type type)
     return sst_auth_real_set (wsrep_sst_auth);
 }
 
-void wsrep_sst_auth_init (const char* value)
+void wsrep_sst_auth_init ()
 {
-    if (wsrep_sst_auth == value) wsrep_sst_auth = NULL;
-    if (value) sst_auth_real_set (value);
+  sst_auth_real_set(wsrep_sst_auth);
 }
 
 bool  wsrep_sst_donor_check (sys_var *self, THD* thd, set_var* var)
@@ -264,52 +257,110 @@ void wsrep_sst_complete (const wsrep_uuid_t* sst_uuid,
   mysql_mutex_unlock (&LOCK_wsrep_sst);
 }
 
-void wsrep_sst_received (wsrep_t*            const wsrep,
-                         const wsrep_uuid_t&       uuid,
-                         wsrep_seqno_t       const seqno,
-                         const void*         const state,
-                         size_t              const state_len)
-{
-    wsrep_get_SE_checkpoint(local_uuid, local_seqno);
+/*
+  If wsrep provider is loaded, inform that the new state snapshot
+  has been received. Also update the local checkpoint.
 
-    if (memcmp(&local_uuid, &uuid, sizeof(wsrep_uuid_t)) ||
-        local_seqno < seqno || seqno < 0)
+  @param wsrep     [IN]               wsrep handle
+  @param uuid      [IN]               Initial state UUID
+  @param seqno     [IN]               Initial state sequence number
+  @param state     [IN]               Always NULL, also ignored by wsrep provider (?)
+  @param state_len [IN]               Always 0, also ignored by wsrep provider (?)
+  @param implicit  [IN]               Whether invoked implicitly due to SST
+                                      (true) or explicitly because if change
+                                      in wsrep_start_position by user (false).
+  @return false                       Success
+          true                        Error
+
+*/
+bool wsrep_sst_received (wsrep_t*            const wsrep,
+                         const wsrep_uuid_t&       uuid,
+                         const wsrep_seqno_t       seqno,
+                         const void*         const state,
+                         const size_t              state_len,
+                         const bool                implicit)
+{
+  /*
+    To keep track of whether the local uuid:seqno should be updated. Also, note
+    that local state (uuid:seqno) is updated/checkpointed only after we get an
+    OK from wsrep provider. By doing so, the values remain consistent across
+    the server & wsrep provider.
+  */
+  bool do_update= false;
+
+  // Get the locally stored uuid:seqno.
+  if (wsrep_get_SE_checkpoint(local_uuid, local_seqno))
+  {
+    return true;
+  }
+
+  if (memcmp(&local_uuid, &uuid, sizeof(wsrep_uuid_t)) ||
+      local_seqno < seqno)
+  {
+    do_update= true;
+  }
+  else if (local_seqno > seqno)
+  {
+    WSREP_WARN("SST position can't be set in past. Requested: %lld, Current: "
+               " %lld.", (long long)seqno, (long long)local_seqno);
+    /*
+      If we are here because of SET command, simply return true (error) instead of
+      aborting.
+    */
+    if (implicit)
     {
-        wsrep_set_SE_checkpoint(uuid, seqno);
-        local_uuid = uuid;
-        local_seqno = seqno;
+      WSREP_WARN("Can't continue.");
+      unireg_abort(1);
     }
-    else if (local_seqno > seqno)
+    else
     {
-        WSREP_WARN("SST postion is in the past: %lld, current: %lld. "
-                   "Can't continue.",
-                   (long long)seqno, (long long)local_seqno);
-        unireg_abort(1);
+      return true;
     }
+  }
 
 #ifdef GTID_SUPPORT
-    wsrep_init_sidno(uuid);
+  wsrep_init_sidno(uuid);
 #endif /* GTID_SUPPORT */
 
-    if (wsrep)
-    {
-        int const rcode(seqno < 0 ? seqno : 0);
-        wsrep_gtid_t const state_id = {
-            uuid, (rcode ? WSREP_SEQNO_UNDEFINED : seqno)
-        };
+  if (wsrep)
+  {
+    int const rcode(seqno < 0 ? seqno : 0);
+    wsrep_gtid_t const state_id= {uuid,
+      (rcode ? WSREP_SEQNO_UNDEFINED : seqno)};
 
-        wsrep->sst_received(wsrep, &state_id, state, state_len, rcode);
+    wsrep_status_t ret= wsrep->sst_received(wsrep, &state_id, state,
+                                            state_len, rcode);
+
+    if (ret != WSREP_OK)
+    {
+      return true;
     }
+  }
+
+  // Now is the good time to update the local state and checkpoint.
+  if (do_update)
+  {
+    if (wsrep_set_SE_checkpoint(uuid, seqno))
+    {
+      return true;
+    }
+
+    local_uuid= uuid;
+    local_seqno= seqno;
+  }
+
+  return false;
 }
 
 // Let applier threads to continue
-void wsrep_sst_continue ()
+bool wsrep_sst_continue ()
 {
   if (sst_needed)
   {
     WSREP_INFO("Signalling provider to continue.");
-    wsrep_sst_received (wsrep, local_uuid, local_seqno, NULL, 0);
+    return wsrep_sst_received (wsrep, local_uuid, local_seqno, NULL, 0, true);
   }
+  return false;
 }
 
 struct sst_thread_arg
@@ -477,7 +528,7 @@ static void* sst_joiner_thread (void* a)
       } else {
         // Scan state ID first followed by wsrep_gtid_domain_id.
         char uuid[512];
-        long int domain_id;
+        unsigned long int domain_id;
         size_t len= pos - out + 1;
 
         if (len > sizeof(uuid)) goto err;       // safety check
@@ -491,11 +542,11 @@ static void* sst_joiner_thread (void* a)
         else if (wsrep_gtid_mode)
         {
           errno= 0;                             /* Reset the errno */
-          domain_id= strtol(pos + 1, NULL, 10);
+          domain_id= strtoul(pos + 1, NULL, 10);
           err= errno;
 
           /* Check if we received a valid gtid_domain_id. */
-          if (err == EINVAL || err == ERANGE || domain_id < 0x0 || domain_id > 0xFFFF)
+          if (err == EINVAL || err == ERANGE)
           {
             WSREP_ERROR("Failed to get donor wsrep_gtid_domain_id.");
             err= EINVAL;
@@ -958,7 +1009,7 @@ static int run_sql_command(THD *thd, const char *query)
     return -1;
   }
 
-  mysql_parse(thd, thd->query(), thd->query_length(), &ps);
+  mysql_parse(thd, thd->query(), thd->query_length(), &ps, FALSE, FALSE);
   if (thd->is_error())
   {
     int const err= thd->get_stmt_da()->sql_errno();
@@ -1277,7 +1328,7 @@ wsrep_cb_status_t wsrep_sst_donate_cb (void* app_ctx, void* recv_ctx,
   /* This will be reset when sync callback is called.
    * Should we set wsrep_ready to FALSE here too? */
 
-  wsrep_config_state.set(WSREP_MEMBER_DONOR);
+  wsrep_config_state->set(WSREP_MEMBER_DONOR);
 
   const char* method = (char*)msg;
   size_t method_len  = strlen (method);
