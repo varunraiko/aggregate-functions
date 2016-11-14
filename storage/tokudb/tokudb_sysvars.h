@@ -101,6 +101,7 @@ extern uint         read_status_frequency;
 extern my_bool      strip_frm_data;
 extern char*        tmp_dir;
 extern uint         write_status_frequency;
+extern my_bool      dir_per_db;
 extern char*        version;
 
 #if TOKU_INCLUDE_HANDLERTON_HANDLE_FATAL_SIGNAL
@@ -108,9 +109,7 @@ extern char*        gdb_path;
 extern my_bool      gdb_on_fatal;
 #endif
 
-#if TOKUDB_CHECK_JEMALLOC
-extern uint         check_jemalloc;
-#endif
+extern my_bool         check_jemalloc;
 
 #if TOKUDB_DEBUG
 // used to control background job manager

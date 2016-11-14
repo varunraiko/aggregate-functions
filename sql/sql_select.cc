@@ -694,7 +694,7 @@ JOIN::prepare(Item ***rref_pointer_array,
   DBUG_ENTER("JOIN::prepare");
 
   // to prevent double initialization on EXPLAIN
-  if (optimized)
+  if (optimization_state != JOIN::NOT_OPTIMIZED)
     DBUG_RETURN(0);
 
   conds= conds_init;
@@ -1032,24 +1032,13 @@ err:
 
 int JOIN::optimize()
 {
-  bool was_optimized= optimized;
+  // to prevent double initialization on EXPLAIN
+  if (optimization_state != JOIN::NOT_OPTIMIZED)
+    return FALSE;
+  optimization_state= JOIN::OPTIMIZATION_IN_PROGRESS;
+
   int res= optimize_inner();
-  /*
-    If we're inside a non-correlated subquery, this function may be 
-    called for the second time after the subquery has been executed
-    and deleted. The second call will not produce a valid query plan, it will
-    short-circuit because optimized==TRUE.
-
-    "was_optimized != optimized" is here to handle this case:
-      - first optimization starts, gets an error (from a const. cheap
-        subquery), returns 1
-      - another JOIN::optimize() call made, and now join->optimize() will
-        return 0, even though we never had a query plan.
-
-    Can have QEP_NOT_PRESENT_YET for degenerate queries (for example,
-    SELECT * FROM tbl LIMIT 0)
-  */
-  if (was_optimized != optimized && !res && have_query_plan != QEP_DELETED)
+  if (!res && have_query_plan != QEP_DELETED)
   {
     create_explain_query_if_not_exists(thd->lex, thd->mem_root);
     have_query_plan= QEP_AVAILABLE;
@@ -1058,6 +1047,7 @@ int JOIN::optimize()
                       !skip_sort_order && !no_order && (order || group_list),
                       select_distinct);
   }
+  optimization_state= JOIN::OPTIMIZATION_DONE;
   return res;
 }
 
@@ -1083,10 +1073,7 @@ JOIN::optimize_inner()
   DBUG_ENTER("JOIN::optimize");
 
   do_send_rows = (unit->select_limit_cnt) ? 1 : 0;
-  // to prevent double initialization on EXPLAIN
-  if (optimized)
-    DBUG_RETURN(0);
-  optimized= 1;
+
   DEBUG_SYNC(thd, "before_join_optimize");
 
   THD_STAGE_INFO(thd, stage_optimizing);
@@ -2060,7 +2047,7 @@ int JOIN::init_execution()
 {
   DBUG_ENTER("JOIN::init_execution");
 
-  DBUG_ASSERT(optimized);
+  DBUG_ASSERT(optimization_state == JOIN::OPTIMIZATION_DONE);
   DBUG_ASSERT(!(select_options & SELECT_DESCRIBE));
   initialized= true;
 
@@ -9185,9 +9172,26 @@ JOIN::make_simple_join(JOIN *parent, TABLE *temp_table)
     We need to destruct the copy_field (allocated in create_tmp_table())
     before setting it to 0 if the join is not "reusable".
   */
-  if (!tmp_join || tmp_join != this) 
-    tmp_table_param.cleanup(); 
-  tmp_table_param.copy_field= tmp_table_param.copy_field_end=0;
+  if (!tmp_join || tmp_join != this)
+    tmp_table_param.cleanup();
+  else
+  {
+    /*
+      Free data buffered in copy_fields, but keep data pointed by copy_field
+      around for next iteration (possibly stored in save_copy_fields).
+
+      It would be logically simpler to not clear copy_field
+      below, but as we have loops that runs over copy_field to
+      copy_field_end that should not be done anymore, it's simpler to
+      just clear the pointers.
+
+      Another option would be to just clear copy_field_end and not run
+      the loops if this is not set or to have tmp_table_param.cleanup()
+      to run cleanup on save_copy_field if copy_field is not set.
+    */
+    tmp_table_param.free_copy_field_data();
+    tmp_table_param.copy_field= tmp_table_param.copy_field_end=0;
+  }
   first_record= sort_and_group=0;
   send_records= (ha_rows) 0;
 
@@ -11903,7 +11907,7 @@ void JOIN::join_free()
 /**
   Free resources of given join.
 
-  @param fill   true if we should free all resources, call with full==1
+  @param full   true if we should free all resources, call with full==1
                 should be last, before it this function can be called with
                 full==0
 
@@ -12023,7 +12027,7 @@ void JOIN::cleanup(bool full)
     /*
       If we have tmp_join and 'this' JOIN is not tmp_join and
       tmp_table_param.copy_field's  of them are equal then we have to remove
-      pointer to  tmp_table_param.copy_field from tmp_join, because it qill
+      pointer to  tmp_table_param.copy_field from tmp_join, because it will
       be removed in tmp_table_param.cleanup().
     */
     if (tmp_join &&
@@ -16127,6 +16131,7 @@ Field *create_tmp_field(THD *thd, TABLE *table,Item *item, Item::Type type,
   case Item::VARBIN_ITEM:
   case Item::CACHE_ITEM:
   case Item::EXPR_CACHE_ITEM:
+  case Item::PARAM_ITEM:
     if (make_copy_field)
     {
       DBUG_ASSERT(((Item_result_field*)item)->result_field);
@@ -22930,7 +22935,7 @@ setup_copy_fields(THD *thd, TMP_TABLE_PARAM *param,
  err:
   if (copy)
     delete [] param->copy_field;			// This is never 0
-  param->copy_field=0;
+  param->copy_field= 0;
 err2:
   DBUG_RETURN(TRUE);
 }

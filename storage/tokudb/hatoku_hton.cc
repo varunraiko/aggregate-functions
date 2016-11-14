@@ -266,7 +266,6 @@ static int tokudb_init_func(void *p) {
     db_env = NULL;
     tokudb_hton = (handlerton *) p;
 
-#if TOKUDB_CHECK_JEMALLOC
     if (tokudb::sysvars::check_jemalloc) {
         typedef int (*mallctl_type)(
             const char*,
@@ -293,7 +292,6 @@ static int tokudb_init_func(void *p) {
             goto error;
         }
     }
-#endif
 
     r = tokudb_set_product_name();
     if (r) {
@@ -533,10 +531,13 @@ static int tokudb_init_func(void *p) {
     db_env->change_fsync_log_period(db_env, tokudb::sysvars::fsync_log_period);
 
     db_env->set_lock_timeout_callback(db_env, tokudb_lock_timeout_callback);
+    db_env->set_dir_per_db(db_env, tokudb::sysvars::dir_per_db);
 
     db_env->set_loader_memory_size(
         db_env,
         tokudb_get_loader_memory_size_callback);
+
+    db_env->set_check_thp(db_env, tokudb::sysvars::check_jemalloc);
 
     r = db_env->open(
         db_env,

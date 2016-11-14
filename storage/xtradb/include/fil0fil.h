@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 1995, 2015, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 1995, 2016, Oracle and/or its affiliates. All Rights Reserved.
 Copyright (c) 2013, 2016, MariaDB Corporation.
 
 This program is free software; you can redistribute it and/or modify it under
@@ -321,13 +321,21 @@ struct fil_space_t {
 				/*!< true if this space is currently in
 				unflushed_spaces */
 	ibool		is_corrupt;
+				/*!< true if tablespace corrupted */
 	bool		printed_compression_failure;
 				/*!< true if we have already printed
 				compression failure */
+	fil_space_crypt_t* crypt_data;
+				/*!< tablespace crypt data or NULL */
+	bool		page_0_crypt_read;
+				/*!< tablespace crypt data has been
+				read */
+	ulint		file_block_size;
+				/*!< file system block size */
+
 	UT_LIST_NODE_T(fil_space_t) space_list;
 				/*!< list of all spaces */
-        fil_space_crypt_t* crypt_data;
-	ulint		file_block_size;/*!< file system block size */
+
 	ulint		magic_n;/*!< FIL_SPACE_MAGIC_N */
 };
 
@@ -436,7 +444,7 @@ fil_node_create(
 	ulint		id,	/*!< in: space id where to append */
 	ibool		is_raw)	/*!< in: TRUE if a raw device or
 				a raw disk partition */
-	__attribute__((nonnull, warn_unused_result));
+	MY_ATTRIBUTE((nonnull, warn_unused_result));
 #ifdef UNIV_LOG_ARCHIVE
 /****************************************************************//**
 Drops files from the start of a file space, so that its size is cut by
@@ -471,7 +479,8 @@ fil_space_create(
 	ulint		zip_size,/*!< in: compressed page size, or
 				0 for uncompressed tablespaces */
 	ulint		purpose, /*!< in: FIL_TABLESPACE, or FIL_LOG if log */
-	fil_space_crypt_t* crypt_data); /*!< in: crypt data */
+	fil_space_crypt_t* crypt_data, /*!< in: crypt data */
+	bool		create_table); /*!< in: true if create table */
 
 /*******************************************************************//**
 Assigns a new space id for a new single-table tablespace. This works simply by
@@ -697,7 +706,7 @@ dberr_t
 fil_discard_tablespace(
 /*===================*/
 	ulint	id)	/*!< in: space id */
-	__attribute__((warn_unused_result));
+	MY_ATTRIBUTE((warn_unused_result));
 #endif /* !UNIV_HOTBACKUP */
 
 /** Test if a tablespace file can be renamed to a new filepath by checking
@@ -1212,7 +1221,7 @@ fil_tablespace_iterate(
 	dict_table_t*		table,
 	ulint			n_io_buffers,
 	PageCallback&		callback)
-	__attribute__((nonnull, warn_unused_result));
+	MY_ATTRIBUTE((nonnull, warn_unused_result));
 
 /*******************************************************************//**
 Checks if a single-table tablespace for a given table name exists in the
@@ -1236,7 +1245,7 @@ fil_get_space_names(
 /*================*/
 	space_name_list_t&	space_name_list)
 				/*!< in/out: Vector for collecting the names. */
-	__attribute__((warn_unused_result));
+	MY_ATTRIBUTE((warn_unused_result));
 
 /** Generate redo log for swapping two .ibd files
 @param[in]	old_table	old table
@@ -1251,7 +1260,7 @@ fil_mtr_rename_log(
 	const dict_table_t*	new_table,
 	const char*		tmp_name,
 	mtr_t*			mtr)
-	__attribute__((nonnull));
+	MY_ATTRIBUTE((nonnull));
 
 /*******************************************************************//**
 Finds the given page_no of the given space id from the double write buffer,

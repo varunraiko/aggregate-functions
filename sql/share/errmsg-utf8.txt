@@ -7143,3 +7143,6 @@ ER_NOT_AGGREGATE_FUNCTION
         eng "Non-aggregate function contains aggregate specific instructions: (FETCH GROUP NEXT ROW)"
 ER_INVALID_AGGREGATE_FUNCTION
         eng "Aggregate specific instruction(FETCH GROUP NEXT ROW) missing from the aggregate function"
+ER_WARN_AGGFUNC_DEPENDENCE
+        eng "Aggregate function '%-.192s)' of SELECT #%d belongs to SELECT #%d"
+        ukr "Агрегатна функція '%-.192s)' з SELECTу #%d належить до SELECTу #%d"
