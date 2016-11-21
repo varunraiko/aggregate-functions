@@ -3560,7 +3560,8 @@ Item_func_group_concat::
 Item_func_group_concat(THD *thd, Name_resolution_context *context_arg,
                        bool distinct_arg, List<Item> *select_list,
                        const SQL_I_List<ORDER> &order_list,
-                       String *separator_arg)
+                       String *separator_arg, bool limit_clause,
+                       ulonglong row_limit, ulonglong offset_limit)
   :Item_sum(thd), tmp_table_param(0), separator(separator_arg), tree(0),
    unique_filter(NULL), table(0),
    order(0), context(context_arg),
@@ -3569,7 +3570,8 @@ Item_func_group_concat(THD *thd, Name_resolution_context *context_arg,
    row_count(0),
    distinct(distinct_arg),
    warning_for_row(FALSE),
-   force_copy_fields(0), original(0)
+   force_copy_fields(0), original(0),
+   row_limit(row_limit), offset_limit(offset_limit),limit_clause(limit_clause)
 {
   Item *item_select;
   Item **arg_ptr;
@@ -3630,7 +3632,8 @@ Item_func_group_concat::Item_func_group_concat(THD *thd,
   warning_for_row(item->warning_for_row),
   always_null(item->always_null),
   force_copy_fields(item->force_copy_fields),
-  original(item)
+  original(item), row_limit(item->row_limit),
+  offset_limit(item->offset_limit),limit_clause(item->limit_clause)
 {
   quick_group= item->quick_group;
   result.set_charset(collation.collation);
@@ -3792,6 +3795,10 @@ bool Item_func_group_concat::add()
     /* check if there was enough memory to insert the row */
     if (!el)
       return 1;
+    if(limit_clause && (tree->elements_in_tree > row_offset+limit_offset))
+    {
+      // delete smallest element;
+    }
   }
   /*
     If the row is not a duplicate (el->count == 1)
