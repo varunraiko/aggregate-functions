@@ -348,7 +348,7 @@ public:
   enum Sumfunctype
   { COUNT_FUNC, COUNT_DISTINCT_FUNC, SUM_FUNC, SUM_DISTINCT_FUNC, AVG_FUNC,
     AVG_DISTINCT_FUNC, MIN_FUNC, MAX_FUNC, STD_FUNC,
-    VARIANCE_FUNC, SUM_BIT_FUNC, UDF_SUM_FUNC, GROUP_CONCAT_FUNC, SP_AGGREGATE_FUNC
+    VARIANCE_FUNC, SUM_BIT_FUNC, UDF_SUM_FUNC, GROUP_CONCAT_FUNC, SP_AGGREGATE_FUNC,
     ROW_NUMBER_FUNC, RANK_FUNC, DENSE_RANK_FUNC, PERCENT_RANK_FUNC,
     CUME_DIST_FUNC, NTILE_FUNC, FIRST_VALUE_FUNC, LAST_VALUE_FUNC,
     NTH_VALUE_FUNC, LEAD_FUNC, LAG_FUNC
@@ -1246,6 +1246,7 @@ public:
   bool fix_fields(THD *thd, Item **ref);
   const char *func_name() const;
   enum Item_result result_type () const;
+  enum enum_field_types field_type() const;
   bool add();
   bool sp_check_access(THD *thd);
 
@@ -1293,6 +1294,8 @@ public:
   void update_field(){DBUG_ASSERT(0);}
   void clear();
   void cleanup();
+  Item *get_copy(THD *thd, MEM_ROOT *mem_root)
+  { return get_item_copy<Item_sum_sp>(thd, mem_root, this); }
   inline Field *get_sp_result_field()
   {
     return sp_result_field;
@@ -1729,7 +1732,7 @@ public:
   Item_func_group_concat(THD *thd, Name_resolution_context *context_arg,
                          bool is_distinct, List<Item> *is_select,
                          const SQL_I_List<ORDER> &is_order, String *is_separator,
-                         ulonglong row_limit, ulonglong offset_limit);
+                         bool limit_clause, ulonglong row_limit, ulonglong offset_limit);
 
   Item_func_group_concat(THD *thd, Item_func_group_concat *item);
   ~Item_func_group_concat();

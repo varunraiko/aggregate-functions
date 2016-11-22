@@ -1553,6 +1553,14 @@ Item_sum_sp::result_type() const
   DBUG_RETURN(sp_result_field->result_type());
 }
 
+enum enum_field_types
+Item_sum_sp::field_type() const
+{
+  DBUG_ENTER("Item_func_sp::field_type");
+  DBUG_ASSERT(sp_result_field);
+  DBUG_RETURN(sp_result_field->type());
+}
+
 void
 Item_sum_sp::cleanup()
 {
@@ -3795,9 +3803,11 @@ bool Item_func_group_concat::add()
     /* check if there was enough memory to insert the row */
     if (!el)
       return 1;
-    if(limit_clause && (tree->elements_in_tree > row_offset+limit_offset))
+    if(limit_clause && (tree->elements_in_tree > row_limit+offset_limit))
     {
-      // delete smallest element;
+      // tree_search_key();
+       tree_delete(tree, table->record[0] + table->s->null_bytes, 0,
+                    tree->custom_arg);
     }
   }
   /*
