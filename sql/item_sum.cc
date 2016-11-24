@@ -3483,6 +3483,7 @@ int dump_leaf_key(void* key_arg, element_count count __attribute__((unused)),
   String *result= &item->result;
   Item **arg= item->args, **arg_end= item->args + item->arg_count_field;
   uint old_length= result->length();
+  ulonglong *offset_limit= &item->offset_limit;
 
   if (item->no_appended)
     item->no_appended= FALSE;
@@ -3517,7 +3518,15 @@ int dump_leaf_key(void* key_arg, element_count count __attribute__((unused)),
         res= (*arg)->val_str(&tmp);
     }
     if (res)
+    {
+      if(*offset_limit)
+      {
+        (*offset_limit)--;
+        item->no_appended= TRUE;
+      }
+      else
       result->append(*res);
+    }
   }
 
   item->row_count++;
@@ -3579,7 +3588,8 @@ Item_func_group_concat(THD *thd, Name_resolution_context *context_arg,
    distinct(distinct_arg),
    warning_for_row(FALSE),
    force_copy_fields(0), original(0),
-   row_limit(row_limit), offset_limit(offset_limit),limit_clause(limit_clause)
+   row_limit(row_limit), offset_limit(offset_limit),limit_clause(limit_clause),
+   copy_offset_limit(offset_limit)
 {
   Item *item_select;
   Item **arg_ptr;
@@ -3641,7 +3651,8 @@ Item_func_group_concat::Item_func_group_concat(THD *thd,
   always_null(item->always_null),
   force_copy_fields(item->force_copy_fields),
   original(item), row_limit(item->row_limit),
-  offset_limit(item->offset_limit),limit_clause(item->limit_clause)
+  offset_limit(item->offset_limit),limit_clause(item->limit_clause),
+  copy_offset_limit(item->copy_offset_limit)
 {
   quick_group= item->quick_group;
   result.set_charset(collation.collation);
@@ -3754,6 +3765,7 @@ void Item_func_group_concat::clear()
   null_value= TRUE;
   warning_for_row= FALSE;
   no_appended= TRUE;
+  offset_limit=copy_offset_limit;
   if (tree)
     reset_tree(tree);
   if (unique_filter)
@@ -3805,9 +3817,10 @@ bool Item_func_group_concat::add()
       return 1;
     if(limit_clause && (tree->elements_in_tree > row_limit+offset_limit))
     {
-      // tree_search_key();
-       tree_delete(tree, table->record[0] + table->s->null_bytes, 0,
-                    tree->custom_arg);
+      //tree_search_edge(tree,tree->parents,&tree->parents,
+      //offsetof(TREE_ELEMENT, left));
+      //tree_delete(tree, table->record[0] + table->s->null_bytes, 0,
+      //              tree->custom_arg);
     }
   }
   /*
@@ -4047,7 +4060,6 @@ String* Item_func_group_concat::val_str(String* str)
                         ER_CUT_VALUE_GROUP_CONCAT, ER(ER_CUT_VALUE_GROUP_CONCAT),
                         row_count);
   }
-
   return &result;
 }
 
