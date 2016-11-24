@@ -1713,6 +1713,7 @@ class Item_func_group_concat : public Item_sum
   ulonglong row_limit;
   ulonglong offset_limit;
   ulonglong copy_offset_limit;
+  ulonglong copy_row_limit;
   /*
     Following is 0 normal object and pointer to original one for copy
     (to correctly free resources)
