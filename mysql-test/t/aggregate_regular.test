@@ -23,6 +23,7 @@ begin
   end loop;
 end|
 
+--error ER_INVALID_AGGREGATE_FUNCTION
 create aggregate function agg_test5(x double) returns double
 begin
   declare z double default 0;
@@ -117,7 +118,6 @@ select agg_sum((select val from t2 where 0 > 1))  from t1;
 select agg_sum((select val from t2 where id= 1))  from t1;
 
 select agg_test4(sal) from t1;
-select agg_test5(sal) from t1;
 
 SELECT agg_sum(sal)*agg_sum(sal) FROM t1;
 
@@ -145,4 +145,3 @@ drop function agg_test2;
 drop function increm;
 drop function agg_test3;
 drop function agg_test4;
-drop function agg_test5;

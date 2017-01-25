@@ -203,7 +203,7 @@ counter	id	agg_sum(sal)	sum(distinct sal)
 2	2	7000	7000
 2	3	6000	6000
 0	7	12000	12000
-select val, counter, id, agg_sum(sal), sum(distinct sal), agg_min(sal), agg_max(sal), agg_avg(sal) from t1 where id>= 1 group by id, val order by counter, val;
+select val, counter, id, agg_sum(sal), sum(distinct sal), agg_min(sal), agg_max(sal), agg_avg(sal) from t1 where id>= 1 group by id, val order by counter, val, id;
 val	counter	id	agg_sum(sal)	sum(distinct sal)	agg_min(sal)	agg_max(sal)	agg_avg(sal)
 12	0	7	7000	7000	7000	7000	7000
 14	1	6	4000	4000	4000	4000	4000

@@ -25,6 +25,7 @@ declare z double default 0;
 declare continue handler for not found return z;
 return -1;
 end|
+ERROR HY000: Aggregate specific instruction(FETCH GROUP NEXT ROW) missing from the aggregate function
 create aggregate function agg_test(x INT) returns CHAR(10)
 begin
 declare mini INT default 0;
@@ -107,9 +108,6 @@ agg_sum((select val from t2 where id= 1))
 select agg_test4(sal) from t1;
 agg_test4(sal)
 0
-select agg_test5(sal) from t1;
-agg_test5(sal)
--1
 SELECT agg_sum(sal)*agg_sum(sal) FROM t1;
 agg_sum(sal)*agg_sum(sal)
 25000000
@@ -174,4 +172,3 @@ drop function agg_test2;
 drop function increm;
 drop function agg_test3;
 drop function agg_test4;
-drop function agg_test5;
