@@ -95,8 +95,8 @@ bool compare_record(const TABLE *table)
   
   /* 
      The storage engine has read all columns, so it's safe to compare all bits
-     including those not in the write_set. This is cheaper than the field-by-field
-     comparison done above.
+     including those not in the write_set. This is cheaper than the
+     field-by-field comparison done above.
   */ 
   if (table->s->can_cmp_whole_record)
     return cmp_record(table,record[1]);
@@ -254,7 +254,7 @@ int mysql_update(THD *thd,
                  ha_rows *found_return, ha_rows *updated_return)
 {
   bool		using_limit= limit != HA_POS_ERROR;
-  bool safe_update= MY_TEST(thd->variables.option_bits & OPTION_SAFE_UPDATES);
+  bool          safe_update= thd->variables.option_bits & OPTION_SAFE_UPDATES;
   bool          used_key_is_modified= FALSE, transactional_table, will_batch;
   bool		can_compare_record;
   int           res;
@@ -270,6 +270,7 @@ int mysql_update(THD *thd,
   key_map	old_covering_keys;
   TABLE		*table;
   SQL_SELECT	*select= NULL;
+  SORT_INFO     *file_sort= 0;
   READ_RECORD	info;
   SELECT_LEX    *select_lex= &thd->lex->select_lex;
   ulonglong     id;
@@ -340,7 +341,8 @@ int mysql_update(THD *thd,
   if (table_list->is_view())
     unfix_fields(fields);
 
-  if (setup_fields_with_no_wrap(thd, 0, fields, MARK_COLUMNS_WRITE, 0, 0))
+  if (setup_fields_with_no_wrap(thd, Ref_ptr_array(),
+                                fields, MARK_COLUMNS_WRITE, 0, 0))
     DBUG_RETURN(1);                     /* purecov: inspected */
   if (table_list->view && check_fields(thd, fields))
   {
@@ -351,15 +353,13 @@ int mysql_update(THD *thd,
     my_error(ER_NON_UPDATABLE_TABLE, MYF(0), table_list->alias, "UPDATE");
     DBUG_RETURN(1);
   }
-  if (table->default_field)
-    table->mark_default_fields_for_write();
 
 #ifndef NO_EMBEDDED_ACCESS_CHECKS
   /* Check values */
   table_list->grant.want_privilege= table->grant.want_privilege=
     (SELECT_ACL & ~table->grant.privilege);
 #endif
-  if (setup_fields(thd, 0, values, MARK_COLUMNS_READ, 0, 0))
+  if (setup_fields(thd, Ref_ptr_array(), values, MARK_COLUMNS_READ, 0, 0))
   {
     free_underlaid_joins(thd, select_lex);
     DBUG_RETURN(1);				/* purecov: inspected */
@@ -371,7 +371,7 @@ int mysql_update(THD *thd,
   switch_to_nullable_trigger_fields(fields, table);
   switch_to_nullable_trigger_fields(values, table);
 
-  /* Apply the IN=>EXISTS transformation to all subqueries and optimize them. */
+  /* Apply the IN=>EXISTS transformation to all subqueries and optimize them */
   if (select_lex->optimize_unflattened_subqueries(false))
     DBUG_RETURN(TRUE);
 
@@ -392,14 +392,6 @@ int mysql_update(THD *thd,
     }
   }
 
-  /*
-    If a timestamp field settable on UPDATE is present then to avoid wrong
-    update force the table handler to retrieve write-only fields to be able
-    to compare records and detect data change.
-  */
-  if ((table->file->ha_table_flags() & HA_PARTIAL_COLUMN_READ) &&
-      table->default_field && table->has_default_function(true))
-    bitmap_union(table->read_set, table->write_set);
   // Don't count on usage of 'only index' when calculating which key to use
   table->covering_keys.clear_all();
 
@@ -420,7 +412,7 @@ int mysql_update(THD *thd,
   table->file->info(HA_STATUS_VARIABLE | HA_STATUS_NO_LOCK);
   set_statistics_for_table(thd, table);
 
-  select= make_select(table, 0, 0, conds, 0, &error);
+  select= make_select(table, 0, 0, conds, (SORT_INFO*) 0, 0, &error);
   if (error || !limit || thd->is_error() ||
       (select && select->check_quick(thd, safe_update, limit)))
   {
@@ -534,6 +526,9 @@ int mysql_update(THD *thd,
   DBUG_EXECUTE_IF("show_explain_probe_update_exec_start", 
                   dbug_serve_apcs(thd, 1););
   
+  if (!(select && select->quick))
+    status_var_increment(thd->status_var.update_scan_count);
+
   if (query_plan.using_filesort || query_plan.using_io_buffer)
   {
     /*
@@ -556,28 +551,15 @@ int mysql_update(THD *thd,
 	to update
         NOTE: filesort will call table->prepare_for_position()
       */
-      uint         length= 0;
-      SORT_FIELD  *sortorder;
-      ha_rows examined_rows;
-      ha_rows found_rows;
+      Filesort fsort(order, limit, true, select);
 
-      table->sort.io_cache = (IO_CACHE *) my_malloc(sizeof(IO_CACHE),
-						    MYF(MY_FAE | MY_ZEROFILL |
-                                                        MY_THREAD_SPECIFIC));
       Filesort_tracker *fs_tracker= 
         thd->lex->explain->get_upd_del_plan()->filesort_tracker;
 
-      if (!(sortorder=make_unireg_sortorder(thd, NULL, 0, order, &length, NULL)) ||
-          (table->sort.found_records= filesort(thd, table, sortorder, length,
-                                               select, limit,
-                                               true,
-                                               &examined_rows, &found_rows,
-                                               fs_tracker))
-          == HA_POS_ERROR)
-      {
+      if (!(file_sort= filesort(thd, table, &fsort, fs_tracker)))
 	goto err;
-      }
-      thd->inc_examined_row_count(examined_rows);
+      thd->inc_examined_row_count(file_sort->examined_rows);
+
       /*
 	Filesort has already found and selected the rows we want to update,
 	so we don't need the where clause
@@ -604,6 +586,7 @@ int mysql_update(THD *thd,
         close_cached_file(&tempfile);
         goto err;
       }
+
       table->file->try_semi_consistent_read(1);
 
       /*
@@ -618,7 +601,7 @@ int mysql_update(THD *thd,
       */
 
       if (query_plan.index == MAX_KEY || (select && select->quick))
-        error= init_read_record(&info, thd, table, select, 0, 1, FALSE);
+        error= init_read_record(&info, thd, table, select, NULL, 0, 1, FALSE);
       else
         error= init_read_record_idx(&info, thd, table, 1, query_plan.index,
                                     reverse);
@@ -635,14 +618,10 @@ int mysql_update(THD *thd,
       while (!(error=info.read_record(&info)) && !thd->killed)
       {
         explain->buf_tracker.on_record_read();
-        if (table->vfield)
-          update_virtual_fields(thd, table,
-                                table->triggers ? VCOL_UPDATE_ALL :
-                                                  VCOL_UPDATE_FOR_READ);
         thd->inc_examined_row_count(1);
 	if (!select || (error= select->skip_record(thd)) > 0)
 	{
-          if (table->file->was_semi_consistent_read())
+          if (table->file->ha_was_semi_consistent_read())
 	    continue;  /* repeat the read of the same row if it still exists */
 
           explain->buf_tracker.on_record_after_where();
@@ -662,8 +641,9 @@ int mysql_update(THD *thd,
 	else
         {
           /*
-            Don't try unlocking the row if skip_record reported an error since in
-            this case the transaction might have been rolled back already.
+            Don't try unlocking the row if skip_record reported an
+            error since in this case the transaction might have been
+            rolled back already.
           */
           if (error < 0)
           {
@@ -702,7 +682,7 @@ int mysql_update(THD *thd,
       if (error >= 0)
 	goto err;
     }
-    table->disable_keyread();
+    table->set_keyread(false);
     table->column_bitmaps_set(save_read_set, save_write_set);
   }
 
@@ -712,7 +692,7 @@ int mysql_update(THD *thd,
   if (select && select->quick && select->quick->reset())
     goto err;
   table->file->try_semi_consistent_read(1);
-  if (init_read_record(&info, thd, table, select, 0, 1, FALSE))
+  if (init_read_record(&info, thd, table, select, file_sort, 0, 1, FALSE))
     goto err;
 
   updated= found= 0;
@@ -753,14 +733,10 @@ int mysql_update(THD *thd,
   while (!(error=info.read_record(&info)) && !thd->killed)
   {
     explain->tracker.on_record_read();
-    if (table->vfield)
-      update_virtual_fields(thd, table,
-                            table->triggers ? VCOL_UPDATE_ALL :
-                                              VCOL_UPDATE_FOR_READ);
     thd->inc_examined_row_count(1);
     if (!select || select->skip_record(thd) > 0)
     {
-      if (table->file->was_semi_consistent_read())
+      if (table->file->ha_was_semi_consistent_read())
         continue;  /* repeat the read of the same row if it still exists */
 
       explain->tracker.on_record_after_where();
@@ -773,7 +749,7 @@ int mysql_update(THD *thd,
 
       if (!can_compare_record || compare_record(table))
       {
-        if (table->default_field && table->update_default_fields())
+        if (table->default_field && table->update_default_fields(1, ignore))
         {
           error= 1;
           break;
@@ -1020,6 +996,7 @@ int mysql_update(THD *thd,
   }
   DBUG_ASSERT(transactional_table || !updated || thd->transaction.stmt.modified_non_trans_table);
   free_underlaid_joins(thd, select_lex);
+  delete file_sort;
 
   /* If LAST_INSERT_ID(X) was used, report X */
   id= thd->arg_of_last_insert_id_function ?
@@ -1053,8 +1030,9 @@ int mysql_update(THD *thd,
 
 err:
   delete select;
+  delete file_sort;
   free_underlaid_joins(thd, select_lex);
-  table->disable_keyread();
+  table->set_keyread(false);
   thd->abort_on_warning= 0;
   DBUG_RETURN(1);
 
@@ -1242,10 +1220,8 @@ bool unsafe_key_update(List<TABLE_LIST> leaves, table_map tables_for_update)
           {
             // Partitioned key is updated
             my_error(ER_MULTI_UPDATE_KEY_CONFLICT, MYF(0),
-                     tl->belong_to_view ? tl->belong_to_view->alias
-                                        : tl->alias,
-                     tl2->belong_to_view ? tl2->belong_to_view->alias
-                                         : tl2->alias);
+                     tl->top_table()->alias,
+                     tl2->top_table()->alias);
             return true;
           }
 
@@ -1263,10 +1239,8 @@ bool unsafe_key_update(List<TABLE_LIST> leaves, table_map tables_for_update)
               {
                 // Clustered primary key is updated
                 my_error(ER_MULTI_UPDATE_KEY_CONFLICT, MYF(0),
-                         tl->belong_to_view ? tl->belong_to_view->alias
-                         : tl->alias,
-                         tl2->belong_to_view ? tl2->belong_to_view->alias
-                         : tl2->alias);
+                         tl->top_table()->alias,
+                         tl2->top_table()->alias);
                 return true;
               }
             }
@@ -1428,7 +1402,8 @@ int mysql_multi_update_prepare(THD *thd)
   if (lex->select_lex.handle_derived(thd->lex, DT_MERGE))  
     DBUG_RETURN(TRUE);
 
-  if (setup_fields_with_no_wrap(thd, 0, *fields, MARK_COLUMNS_WRITE, 0, 0))
+  if (setup_fields_with_no_wrap(thd, Ref_ptr_array(),
+                                *fields, MARK_COLUMNS_WRITE, 0, 0))
     DBUG_RETURN(TRUE);
 
   for (tl= table_list; tl ; tl= tl->next_local)
@@ -1466,11 +1441,13 @@ int mysql_multi_update_prepare(THD *thd)
     {
       if (!tl->single_table_updatable() || check_key_in_view(thd, tl))
       {
-        my_error(ER_NON_UPDATABLE_TABLE, MYF(0), tl->alias, "UPDATE");
+        my_error(ER_NON_UPDATABLE_TABLE, MYF(0),
+                 tl->top_table()->alias, "UPDATE");
         DBUG_RETURN(TRUE);
       }
 
-      DBUG_PRINT("info",("setting table `%s` for update", tl->alias));
+      DBUG_PRINT("info",("setting table `%s` for update",
+                         tl->top_table()->alias));
       /*
         If table will be updated we should not downgrade lock for it and
         leave it as is.
@@ -1615,7 +1592,7 @@ bool mysql_multi_update(THD *thd,
   thd->abort_on_warning= !ignore && thd->is_strict_mode();
   List<Item> total_list;
 
-  res= mysql_select(thd, &select_lex->ref_pointer_array,
+  res= mysql_select(thd,
                     table_list, select_lex->with_wild,
                     total_list,
                     conds, 0, (ORDER *) NULL, (ORDER *)NULL, (Item *) NULL,
@@ -1711,7 +1688,8 @@ int multi_update::prepare(List<Item> &not_used_values,
     reference tables
   */
 
-  int error= setup_fields(thd, 0, *values, MARK_COLUMNS_READ, 0, 0);
+  int error= setup_fields(thd, Ref_ptr_array(),
+                          *values, MARK_COLUMNS_READ, 0, 0);
 
   ti.rewind();
   while ((table_ref= ti++))
@@ -1724,17 +1702,8 @@ int multi_update::prepare(List<Item> &not_used_values,
     {
       table->read_set= &table->def_read_set;
       bitmap_union(table->read_set, &table->tmp_set);
-      /*
-        If a timestamp field settable on UPDATE is present then to avoid wrong
-        update force the table handler to retrieve write-only fields to be able
-        to compare records and detect data change.
-        */
-      if ((table->file->ha_table_flags() & HA_PARTIAL_COLUMN_READ) &&
-          table->default_field && table->has_default_function(true))
-        bitmap_union(table->read_set, table->write_set);
     }
   }
-  
   if (error)
     DBUG_RETURN(1);    
 
@@ -1826,6 +1795,21 @@ void multi_update::update_used_tables()
     item->update_used_tables();
   }
 }
+
+void multi_update::prepare_to_read_rows()
+{
+  /*
+    update column maps now. it cannot be done in ::prepare() before the
+    optimizer, because the optimize might reset them (in
+    SELECT_LEX::update_used_tables()), it cannot be done in
+    ::initialize_tables() after the optimizer, because the optimizer
+    might read rows from const tables
+  */
+
+  for (TABLE_LIST *tl= update_tables; tl; tl= tl->next_local)
+    tl->table->mark_columns_needed_for_update();
+}
+
 
 /*
   Check if table is safe to update on fly
@@ -1943,12 +1927,10 @@ multi_update::initialize_tables(JOIN *join)
     {
       if (safe_update_on_fly(thd, join->join_tab, table_ref, all_tables))
       {
-        table->mark_columns_needed_for_update();
 	table_to_update= table;			// Update table on the fly
 	continue;
       }
     }
-    table->mark_columns_needed_for_update();
     table->prepare_for_position();
 
     /*
@@ -2038,7 +2020,7 @@ loop_end:
 
     /* Make an unique key over the first field to avoid duplicated updates */
     bzero((char*) &group, sizeof(group));
-    group.asc= 1;
+    group.direction= ORDER::ORDER_ASC;
     group.item= (Item**) temp_fields.head_ref();
 
     tmp_param->quick_group=1;
@@ -2125,11 +2107,11 @@ int multi_update::send_data(List<Item> &not_used_values)
 
       table->status|= STATUS_UPDATED;
       store_record(table,record[1]);
-      if (fill_record_n_invoke_before_triggers(thd, table, *fields_for_table[offset],
+      if (fill_record_n_invoke_before_triggers(thd, table,
+                                               *fields_for_table[offset],
                                                *values_for_table[offset], 0,
                                                TRG_EVENT_UPDATE))
 	DBUG_RETURN(1);
-
       /*
         Reset the table->auto_increment_field_not_null as it is valid for
         only one row.
@@ -2140,7 +2122,7 @@ int multi_update::send_data(List<Item> &not_used_values)
       {
 	int error;
 
-        if (table->default_field && table->update_default_fields())
+        if (table->default_field && table->update_default_fields(1, ignore))
           DBUG_RETURN(1);
 
         if ((error= cur_table->view_check_option(thd, ignore)) !=
@@ -2341,6 +2323,17 @@ int multi_update::do_updates()
       goto err;
     }
     table->file->extra(HA_EXTRA_NO_CACHE);
+    /*
+      We have to clear the base record, if we have virtual indexed
+      blob fields, as some storage engines will access the blob fields
+      to calculate the keys to see if they have changed. Without
+      clearing the blob pointers will contain random values which can
+      cause a crash.
+      This is a workaround for engines that access columns not present in
+      either read or write set.
+    */
+    if (table->vfield)
+      empty_record(table);
 
     check_opt_it.rewind();
     while(TABLE *tbl= check_opt_it++)
@@ -2410,6 +2403,10 @@ int multi_update::do_updates()
         field_num++;
       } while ((tbl= check_opt_it++));
 
+      if (table->vfield &&
+          table->update_virtual_fields(VCOL_UPDATE_INDEXED_FOR_UPDATE))
+        goto err2;
+
       table->status|= STATUS_UPDATED;
       store_record(table,record[1]);
 
@@ -2430,11 +2427,11 @@ int multi_update::do_updates()
       if (!can_compare_record || compare_record(table))
       {
         int error;
-        if (table->default_field && (error= table->update_default_fields()))
+        if (table->default_field &&
+            (error= table->update_default_fields(1, ignore)))
           goto err2;
         if (table->vfield &&
-            update_virtual_fields(thd, table,
-                 (table->triggers ? VCOL_UPDATE_ALL : VCOL_UPDATE_FOR_WRITE)))
+            table->update_virtual_fields(VCOL_UPDATE_FOR_WRITE))
           goto err2;
         if ((error= cur_table->view_check_option(thd, ignore)) !=
             VIEW_CHECK_OK)

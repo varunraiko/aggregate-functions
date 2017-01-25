@@ -36,6 +36,7 @@ Copyright (c) 2006, 2015, Percona and/or its affiliates. All rights reserved.
 
 #ident "Copyright (c) 2006, 2015, Percona and/or its affiliates. All rights reserved."
 
+#include <my_global.h>
 #include <string.h>
 #include <time.h>
 #include <stdarg.h>
@@ -465,6 +466,10 @@ int toku_cachetable_openf (CACHEFILE *cfptr, CACHETABLE ct, const char *fname_in
 char *
 toku_cachefile_fname_in_env (CACHEFILE cf) {
     return cf->fname_in_env;
+}
+
+void toku_cachefile_set_fname_in_env(CACHEFILE cf, char *new_fname_in_env) {
+    cf->fname_in_env = new_fname_in_env;
 }
 
 int 
@@ -2901,6 +2906,18 @@ void toku_cachefile_unlink_on_close(CACHEFILE cf) {
 // is this cachefile marked as unlink on close?
 bool toku_cachefile_is_unlink_on_close(CACHEFILE cf) {
     return cf->unlink_on_close;
+}
+
+void toku_cachefile_skip_log_recover_on_close(CACHEFILE cf) {
+    cf->skip_log_recover_on_close = true;
+}
+
+void toku_cachefile_do_log_recover_on_close(CACHEFILE cf) {
+    cf->skip_log_recover_on_close = false;
+}
+
+bool toku_cachefile_is_skip_log_recover_on_close(CACHEFILE cf) {
+    return cf->skip_log_recover_on_close;
 }
 
 uint64_t toku_cachefile_size(CACHEFILE cf) {

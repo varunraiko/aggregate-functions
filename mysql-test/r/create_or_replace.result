@@ -432,11 +432,29 @@ unlock tables;
 CREATE TABLE t1 (col_int_nokey INT)  ENGINE=InnoDB;
 CREATE OR REPLACE TEMPORARY TABLE tmp LIKE t1;
 LOCK TABLE t1 WRITE;
+connect  con1,localhost,root,,test;
 CREATE OR REPLACE TABLE t1 LIKE tmp;
+connection default;
 KILL QUERY con_id;
+connection con1;
 ERROR 70100: Query execution was interrupted
 CREATE OR REPLACE TABLE t1 (a int);
+connection default;
 KILL QUERY con_id;
+connection con1;
 ERROR 70100: Query execution was interrupted
+disconnect con1;
+connection default;
 drop table t1;
 DROP TABLE t2;
+#
+# MDEV-10824 - Crash in CREATE OR REPLACE TABLE t1 AS SELECT spfunc()
+#
+CREATE TABLE t1(a INT);
+CREATE FUNCTION f1() RETURNS VARCHAR(16383) RETURN 'test';
+CREATE OR REPLACE TABLE t1 AS SELECT f1();
+LOCK TABLE t1 WRITE;
+CREATE OR REPLACE TABLE t1 AS SELECT f1();
+UNLOCK TABLES;
+DROP FUNCTION f1;
+DROP TABLE t1;

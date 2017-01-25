@@ -1,6 +1,6 @@
 '\" t
 .\"
-.TH "\FBMYSQLDUMP\FR" "1" "14/12/2015" "MariaDB 10\&.1" "MariaDB Database System"
+.TH "\FBMYSQLDUMP\FR" "1" "22/3/2016" "MariaDB 10\&.2" "MariaDB Database System"
 .\" -----------------------------------------------------------------
 .\" * set default formatting
 .\" -----------------------------------------------------------------
@@ -743,6 +743,29 @@ control whether the date is added to the comment\&. The default is
 (include the date in the comment)\&.
 \fB\-\-skip\-dump\-date\fR
 suppresses date printing\&
+.RE
+.sp
+.RS 4
+.ie n \{\
+\h'-04'\(bu\h'+03'\c
+.\}
+.el \{\
+.sp -1
+.IP \(bu 2.3
+.\}
+.\" mysqldump: dump-slave option
+.\" dump-slave option: mysqldump
+\fB\-\-dump\-slave[=\fR\fB\fIvalue\fR\fR\fB]\fR
+.sp
+Used for producing a dump file from a replication slave server that can be used to set up another slave server 
+with the same master\&. Causes the binary log position and filename of the master to be appended to the dumped 
+data output\&. Setting the value to 1 (the default) will print it as a CHANGE MASTER command in the dumped data 
+output; if set to 2, that command will be prefixed with a comment symbol\&. This option will turn 
+\-\-lock\-all\-tables on, unless \-\-single-transaction is specified too (in which case a global read lock is only 
+taken a short time at the beginning of the dump \- don't forget to read about \-\-single-transaction below)\&. In 
+all cases any action on logs will happen at the exact moment of the dump\&. Option automatically turns 
+\-\-lock\-tables off\&. Using this option causes mysqldump to stop the slave SQL thread before beginning the dump, 
+and restart it again after completion\&.
 .RE
 .sp
 .RS 4

@@ -5642,7 +5642,7 @@ static int sort_maria_ft_key_write(MARIA_SORT_PARAM *sort_param,
 
   if (ha_compare_text(sort_param->seg->charset,
                       a+1,a_len-1,
-                      ft_buf->lastkey+1,val_off-1, 0, 0)==0)
+                      ft_buf->lastkey+1,val_off-1, 0)==0)
   {
     uchar *p;
     if (!ft_buf->buf)                   /* store in second-level tree */
@@ -6103,7 +6103,7 @@ int maria_recreate_table(HA_CHECK *param, MARIA_HA **org_info, char *filename)
   create_info.data_file_length=file_length;
   create_info.auto_increment=share.state.auto_increment;
   create_info.language = (param->language ? param->language :
-			  share.state.header.language);
+			  share.base.language);
   create_info.key_file_length=  status_info.key_file_length;
   create_info.org_data_file_type= ((enum data_file_type)
                                    share.state.header.org_data_file_type);

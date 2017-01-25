@@ -182,6 +182,7 @@ struct binlog_send_info {
   {
     error_text[0] = 0;
     bzero(&error_gtid, sizeof(error_gtid));
+    until_binlog_state.init();
   }
 };
 
@@ -494,7 +495,7 @@ static enum enum_binlog_checksum_alg get_binlog_checksum_value_at_connect(THD * 
 
   TODO
     - Inform the slave threads that they should sync the position
-      in the binary log file with flush_relay_log_info.
+      in the binary log file with Relay_log_info::flush().
       Now they sync is done for next read.
 */
 
@@ -1628,7 +1629,7 @@ is_until_reached(binlog_send_info *info, ulong *ev_offset,
     break;
   case GTID_UNTIL_STOP_AFTER_TRANSACTION:
     if (event_type != XID_EVENT &&
-        (event_type != QUERY_EVENT ||
+        (event_type != QUERY_EVENT ||    /* QUERY_COMPRESSED_EVENT would never be commmit or rollback */
          !Query_log_event::peek_is_commit_rollback
                (info->packet->ptr()+*ev_offset,
                 info->packet->length()-*ev_offset,
@@ -1862,7 +1863,7 @@ send_event_to_slave(binlog_send_info *info, Log_event_type event_type,
     return NULL;
   case GTID_SKIP_TRANSACTION:
     if (event_type == XID_EVENT ||
-        (event_type == QUERY_EVENT &&
+        (event_type == QUERY_EVENT && /* QUERY_COMPRESSED_EVENT would never be commmit or rollback */
          Query_log_event::peek_is_commit_rollback(packet->ptr() + ev_offset,
                                                   len - ev_offset,
                                                   current_checksum_alg)))
@@ -2115,12 +2116,6 @@ static int init_binlog_sender(binlog_send_info *info,
     info->error= ER_MASTER_FATAL_ERROR_READING_BINLOG;
     return 1;
   }
-  if (!server_id_supplied)
-  {
-    info->errmsg= "Misconfigured master - server id was not set";
-    info->error= ER_MASTER_FATAL_ERROR_READING_BINLOG;
-    return 1;
-  }
 
   char search_file_name[FN_REFLEN];
   const char *name=search_file_name;
@@ -2181,9 +2176,7 @@ static int init_binlog_sender(binlog_send_info *info,
   linfo->pos= *pos;
 
   // note: publish that we use file, before we open it
-  mysql_mutex_lock(&LOCK_thread_count);
   thd->current_linfo= linfo;
-  mysql_mutex_unlock(&LOCK_thread_count);
 
   if (check_start_offset(info, linfo->log_file_name, *pos))
     return 1;
@@ -2212,6 +2205,7 @@ static int send_format_descriptor_event(binlog_send_info *info, IO_CACHE *log,
   THD *thd= info->thd;
   String *packet= info->packet;
   Log_event_type event_type;
+  DBUG_ENTER("send_format_descriptor_event");
 
   /**
    * 1) reset fdev before each log-file
@@ -2226,12 +2220,12 @@ static int send_format_descriptor_event(binlog_send_info *info, IO_CACHE *log,
   {
     info->errmsg= "Out of memory initializing format_description event";
     info->error= ER_MASTER_FATAL_ERROR_READING_BINLOG;
-    return 1;
+    DBUG_RETURN(1);
   }
 
   /* reset transmit packet for the event read from binary log file */
   if (reset_transmit_packet(info, info->flags, &ev_offset, &info->errmsg))
-    return 1;
+    DBUG_RETURN(1);
 
   /*
     Try to find a Format_description_log_event at the beginning of
@@ -2247,7 +2241,7 @@ static int send_format_descriptor_event(binlog_send_info *info, IO_CACHE *log,
   if (error)
   {
     set_read_error(info, error);
-    return 1;
+    DBUG_RETURN(1);
   }
 
   event_type= (Log_event_type)((uchar)(*packet)[LOG_EVENT_OFFSET+ev_offset]);
@@ -2268,7 +2262,7 @@ static int send_format_descriptor_event(binlog_send_info *info, IO_CACHE *log,
     sql_print_warning("Failed to find format descriptor event in "
                       "start of binlog: %s",
                       info->log_file_name);
-    return 1;
+    DBUG_RETURN(1);
   }
 
   info->current_checksum_alg= get_checksum_alg(packet->ptr() + ev_offset,
@@ -2288,7 +2282,7 @@ static int send_format_descriptor_event(binlog_send_info *info, IO_CACHE *log,
     sql_print_warning("Master is configured to log replication events "
                       "with checksum, but will not send such events to "
                       "slaves that cannot process them");
-    return 1;
+    DBUG_RETURN(1);
   }
 
   uint ev_len= packet->length() - ev_offset;
@@ -2302,7 +2296,7 @@ static int send_format_descriptor_event(binlog_send_info *info, IO_CACHE *log,
     info->error= ER_MASTER_FATAL_ERROR_READING_BINLOG;
     info->errmsg= "Corrupt Format_description event found "
         "or out-of-memory";
-    return 1;
+    DBUG_RETURN(1);
   }
   delete info->fdev;
   info->fdev= tmp;
@@ -2361,7 +2355,7 @@ static int send_format_descriptor_event(binlog_send_info *info, IO_CACHE *log,
   {
     info->errmsg= "Failed on my_net_write()";
     info->error= ER_UNKNOWN_ERROR;
-    return 1;
+    DBUG_RETURN(1);
   }
 
   /*
@@ -2381,7 +2375,7 @@ static int send_format_descriptor_event(binlog_send_info *info, IO_CACHE *log,
   if (error)
   {
     set_read_error(info, error);
-    return 1;
+    DBUG_RETURN(1);
   }
 
   event_type= (Log_event_type)((uchar)(*packet)[LOG_EVENT_OFFSET]);
@@ -2393,14 +2387,15 @@ static int send_format_descriptor_event(binlog_send_info *info, IO_CACHE *log,
     if (!sele)
     {
       info->error= ER_MASTER_FATAL_ERROR_READING_BINLOG;
-      return 1;
+      DBUG_RETURN(1);
     }
 
     if (info->fdev->start_decryption(sele))
     {
       info->error= ER_MASTER_FATAL_ERROR_READING_BINLOG;
       info->errmsg= "Could not decrypt binlog: encryption key error";
-      return 1;
+      delete sele;
+      DBUG_RETURN(1);
     }
     delete sele;
   }
@@ -2416,7 +2411,7 @@ static int send_format_descriptor_event(binlog_send_info *info, IO_CACHE *log,
 
 
   /** all done */
-  return 0;
+  DBUG_RETURN(0);
 }
 
 static bool should_stop(binlog_send_info *info)
@@ -2922,9 +2917,7 @@ err:
     mysql_file_close(file, MYF(MY_WME));
   }
 
-  mysql_mutex_lock(&LOCK_thread_count);
-  thd->current_linfo = 0;
-  mysql_mutex_unlock(&LOCK_thread_count);
+  thd->reset_current_linfo();
   thd->variables.max_allowed_packet= old_max_allowed_packet;
   delete info->fdev;
 
@@ -3075,12 +3068,6 @@ int start_slave(THD* thd , Master_info* mi,  bool net_report)
     if (init_master_info(mi,master_info_file_tmp,relay_log_info_file_tmp, 0,
 			 thread_mask))
       slave_errno=ER_MASTER_INFO;
-    else if (!server_id_supplied)
-    {
-      slave_errno= ER_BAD_SLAVE; net_report= 0;
-      my_message(slave_errno, "Misconfigured slave: server_id was not set; Fix in config file",
-                   MYF(0));
-    }
     else if (!*mi->host)
     {
       slave_errno= ER_BAD_SLAVE; net_report= 0;
@@ -3319,6 +3306,7 @@ int reset_slave(THD *thd, Master_info* mi)
   mi->clear_error();
   mi->rli.clear_error();
   mi->rli.clear_until_condition();
+  mi->rli.clear_sql_delay();
   mi->rli.slave_skip_counter= 0;
 
   // close master_info_file, relay_log_info_file, set mi->inited=rli->inited=0
@@ -3379,9 +3367,7 @@ err:
   SYNOPSIS
     kill_zombie_dump_threads()
     slave_server_id     the slave's server id
-
 */
-
 
 void kill_zombie_dump_threads(uint32 slave_server_id)
 {
@@ -3630,6 +3616,9 @@ bool change_master(THD* thd, Master_info* mi, bool *master_info_added)
   if (lex_mi->ssl != LEX_MASTER_INFO::LEX_MI_UNCHANGED)
     mi->ssl= (lex_mi->ssl == LEX_MASTER_INFO::LEX_MI_ENABLE);
 
+  if (lex_mi->sql_delay != -1)
+    mi->rli.set_sql_delay(lex_mi->sql_delay);
+
   if (lex_mi->ssl_verify_server_cert != LEX_MASTER_INFO::LEX_MI_UNCHANGED)
     mi->ssl_verify_server_cert=
       (lex_mi->ssl_verify_server_cert == LEX_MASTER_INFO::LEX_MI_ENABLE);
@@ -3814,7 +3803,7 @@ bool change_master(THD* thd, Master_info* mi, bool *master_info_added)
     in-memory value at restart (thus causing errors, as the old relay log does
     not exist anymore).
   */
-  flush_relay_log_info(&mi->rli);
+  mi->rli.flush();
   mysql_cond_broadcast(&mi->data_cond);
   mysql_mutex_unlock(&mi->rli.data_lock);
 
@@ -3946,9 +3935,7 @@ bool mysql_show_binlog_events(THD* thd)
       goto err;
     }
 
-    mysql_mutex_lock(&LOCK_thread_count);
-    thd->current_linfo = &linfo;
-    mysql_mutex_unlock(&LOCK_thread_count);
+    thd->current_linfo= &linfo;
 
     if ((file=open_binlog(&log, linfo.log_file_name, &errmsg)) < 0)
       goto err;
@@ -4080,9 +4067,7 @@ err:
   else
     my_eof(thd);
 
-  mysql_mutex_lock(&LOCK_thread_count);
-  thd->current_linfo = 0;
-  mysql_mutex_unlock(&LOCK_thread_count);
+  thd->reset_current_linfo();
   thd->variables.max_allowed_packet= old_max_allowed_packet;
   DBUG_RETURN(ret);
 }

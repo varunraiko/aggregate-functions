@@ -42,7 +42,6 @@ Copyright (c) 2006, 2015, Percona and/or its affiliates. All rights reserved.
 
 #cmakedefine TOKU_DEBUG_PARANOID 1
 #cmakedefine USE_VALGRIND 1
-
 #cmakedefine HAVE_ALLOCA_H 1
 #cmakedefine HAVE_ARPA_INET_H 1
 #cmakedefine HAVE_BYTESWAP_H 1
@@ -78,6 +77,10 @@ Copyright (c) 2006, 2015, Percona and/or its affiliates. All rights reserved.
 #cmakedefine HAVE_O_DIRECT 1
 #cmakedefine HAVE_F_NOCACHE 1
 
+#cmakedefine HAVE_MAP_ANONYMOUS 1
+#cmakedefine HAVE_MINCORE 1
+#cmakedefine HAVE_PR_SET_PTRACER 1
+#cmakedefine HAVE_PR_SET_PTRACER_ANY 1
 #cmakedefine HAVE_MALLOC_SIZE 1
 #cmakedefine HAVE_MALLOC_USABLE_SIZE 1
 #cmakedefine HAVE_MEMALIGN 1
@@ -88,6 +91,7 @@ Copyright (c) 2006, 2015, Percona and/or its affiliates. All rights reserved.
 #cmakedefine HAVE_PTHREAD_RWLOCKATTR_SETKIND_NP 1
 #cmakedefine HAVE_PTHREAD_YIELD 1
 #cmakedefine HAVE_PTHREAD_YIELD_NP 1
+#cmakedefine HAVE_PTHREAD_THREADID_NP 1
 #cmakedefine HAVE_PTHREAD_GETTHREADID_NP 1
 
 #cmakedefine PTHREAD_YIELD_RETURNS_INT 1

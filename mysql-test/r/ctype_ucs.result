@@ -2523,7 +2523,7 @@ show create table t1;
 Table	Create Table
 t1	CREATE TABLE `t1` (
   `c1` varchar(83) CHARACTER SET ucs2 DEFAULT NULL,
-  `c2` decimal(65,30) DEFAULT NULL
+  `c2` decimal(65,38) DEFAULT NULL
 ) ENGINE=MyISAM DEFAULT CHARSET=latin1
 drop table t1;
 select hex(concat(@@ft_max_word_len));
@@ -2873,7 +2873,7 @@ create table t1 as select concat(AsText(GeomFromText('Point(1 2)'))) as c1;
 show create table t1;
 Table	Create Table
 t1	CREATE TABLE `t1` (
-  `c1` longtext CHARACTER SET ucs2
+  `c1` longtext CHARACTER SET ucs2 DEFAULT NULL
 ) ENGINE=MyISAM DEFAULT CHARSET=latin1
 drop table t1;
 select hex(concat(period_add(200902, 2)));
@@ -4230,7 +4230,7 @@ GROUP_CONCAT(CASE WHEN a THEN a ELSE '' END)
 1234567
 SELECT COALESCE(a,'') FROM t1 GROUP BY 1;
 Catalog	Database	Table	Table_alias	Column	Column_alias	Type	Length	Max length	Is_null	Flags	Decimals	Charsetnr
-def					COALESCE(a,'')	253	9	7	Y	0	31	8
+def					COALESCE(a,'')	253	9	7	Y	0	39	8
 COALESCE(a,'')
 1234567
 # All columns must be VARCHAR(9) with the same length:
@@ -4478,11 +4478,11 @@ NULL
 id	select_type	table	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	SIMPLE	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	No tables used
 Level	Code	Message
-Note	1003	select (v_LastPaymentDate@0 < now()) AS `v_LastPaymentDate < NOW()`
+Note	1003	select v_LastPaymentDate@0 < current_timestamp() AS `v_LastPaymentDate < NOW()`
 id	select_type	table	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	SIMPLE	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	No tables used
 Warnings:
-Note	1003	select concat(convert(v_LastPaymentDate@0 using ucs2),convert(now() using ucs2)) AS `CONCAT(v_LastPaymentDate, NOW())`
+Note	1003	select concat(convert(v_LastPaymentDate@0 using ucs2),convert(current_timestamp() using ucs2)) AS `CONCAT(v_LastPaymentDate, NOW())`
 DROP PROCEDURE p1;
 #
 # Bug#52159 returning time type from function and empty left join causes debug assertion
@@ -5386,7 +5386,7 @@ EXPLAIN EXTENDED SELECT * FROM t1 WHERE CONCAT(c1)='a' AND CONCAT(c1) LIKE 'a ';
 id	select_type	table	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	SIMPLE	t1	ALL	NULL	NULL	NULL	NULL	2	100.00	Using where
 Warnings:
-Note	1003	select `test`.`t1`.`c1` AS `c1` from `test`.`t1` where ((concat(`test`.`t1`.`c1`) = 'a') and (concat(`test`.`t1`.`c1`) like 'a '))
+Note	1003	select `test`.`t1`.`c1` AS `c1` from `test`.`t1` where concat(`test`.`t1`.`c1`) = 'a' and concat(`test`.`t1`.`c1`) like 'a '
 DROP TABLE t1;
 CREATE TABLE t1 AS SELECT REPEAT('a', 10) AS c1 LIMIT 0;
 SHOW CREATE TABLE t1;
@@ -5409,7 +5409,7 @@ EXPLAIN EXTENDED SELECT * FROM t1 WHERE 'a'=CONCAT(c1) AND 'a ' LIKE CONCAT(c1);
 id	select_type	table	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	SIMPLE	t1	ALL	NULL	NULL	NULL	NULL	2	100.00	Using where
 Warnings:
-Note	1003	select `test`.`t1`.`c1` AS `c1` from `test`.`t1` where (('a' = concat(`test`.`t1`.`c1`)) and ('a ' like concat(`test`.`t1`.`c1`)))
+Note	1003	select `test`.`t1`.`c1` AS `c1` from `test`.`t1` where 'a' = concat(`test`.`t1`.`c1`) and 'a ' like concat(`test`.`t1`.`c1`)
 DROP TABLE t1;
 CREATE TABLE t1 AS SELECT REPEAT('a', 10) AS c1 LIMIT 0;
 SHOW CREATE TABLE t1;
@@ -5432,7 +5432,7 @@ EXPLAIN EXTENDED SELECT * FROM t1 WHERE '% '=CONCAT(c1) AND 'a' LIKE CONCAT(c1);
 id	select_type	table	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	SIMPLE	t1	ALL	NULL	NULL	NULL	NULL	2	100.00	Using where
 Warnings:
-Note	1003	select `test`.`t1`.`c1` AS `c1` from `test`.`t1` where (('% ' = concat(`test`.`t1`.`c1`)) and ('a' like concat(`test`.`t1`.`c1`)))
+Note	1003	select `test`.`t1`.`c1` AS `c1` from `test`.`t1` where '% ' = concat(`test`.`t1`.`c1`) and 'a' like concat(`test`.`t1`.`c1`)
 DROP TABLE t1;
 CREATE TABLE t1 AS SELECT REPEAT('a', 10) AS c1 LIMIT 0;
 SHOW CREATE TABLE t1;
@@ -5455,7 +5455,7 @@ EXPLAIN EXTENDED SELECT * FROM t1 WHERE '%'=CONCAT(c1) AND 'a' LIKE CONCAT(c1);
 id	select_type	table	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	SIMPLE	t1	ALL	NULL	NULL	NULL	NULL	2	100.00	Using where
 Warnings:
-Note	1003	select `test`.`t1`.`c1` AS `c1` from `test`.`t1` where (('%' = concat(`test`.`t1`.`c1`)) and ('a' like concat(`test`.`t1`.`c1`)))
+Note	1003	select `test`.`t1`.`c1` AS `c1` from `test`.`t1` where '%' = concat(`test`.`t1`.`c1`) and 'a' like concat(`test`.`t1`.`c1`)
 DROP TABLE t1;
 #
 # MDEV-8694 Wrong result for SELECT..WHERE a NOT LIKE 'a ' AND a='a'
@@ -5477,7 +5477,7 @@ EXPLAIN EXTENDED SELECT a, LENGTH(a) FROM t1 WHERE a NOT LIKE 'a ' AND a='a';
 id	select_type	table	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	SIMPLE	t1	ALL	NULL	NULL	NULL	NULL	2	100.00	Using where
 Warnings:
-Note	1003	select `test`.`t1`.`a` AS `a`,length(`test`.`t1`.`a`) AS `LENGTH(a)` from `test`.`t1` where ((`test`.`t1`.`a` = 'a') and (not((`test`.`t1`.`a` like 'a '))))
+Note	1003	select `test`.`t1`.`a` AS `a`,length(`test`.`t1`.`a`) AS `LENGTH(a)` from `test`.`t1` where `test`.`t1`.`a` = 'a' and `test`.`t1`.`a`  not like 'a '
 DROP TABLE t1;
 #
 # End of MDEV-8694
@@ -5507,7 +5507,7 @@ EXPLAIN EXTENDED SELECT * FROM t1 WHERE CONCAT(c1)='a' AND CONCAT(c1) LIKE 'a ';
 id	select_type	table	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	SIMPLE	t1	ALL	NULL	NULL	NULL	NULL	2	100.00	Using where
 Warnings:
-Note	1003	select `test`.`t1`.`c1` AS `c1` from `test`.`t1` where ((concat(`test`.`t1`.`c1`) = 'a') and (concat(`test`.`t1`.`c1`) like 'a '))
+Note	1003	select `test`.`t1`.`c1` AS `c1` from `test`.`t1` where concat(`test`.`t1`.`c1`) = 'a' and concat(`test`.`t1`.`c1`) like 'a '
 DROP TABLE t1;
 CREATE TABLE t1 AS SELECT REPEAT('a', 10) AS c1 LIMIT 0;
 SHOW CREATE TABLE t1;
@@ -5530,7 +5530,7 @@ EXPLAIN EXTENDED SELECT * FROM t1 WHERE 'a'=CONCAT(c1) AND 'a ' LIKE CONCAT(c1);
 id	select_type	table	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	SIMPLE	t1	ALL	NULL	NULL	NULL	NULL	2	100.00	Using where
 Warnings:
-Note	1003	select `test`.`t1`.`c1` AS `c1` from `test`.`t1` where (('a' = concat(`test`.`t1`.`c1`)) and ('a ' like concat(`test`.`t1`.`c1`)))
+Note	1003	select `test`.`t1`.`c1` AS `c1` from `test`.`t1` where 'a' = concat(`test`.`t1`.`c1`) and 'a ' like concat(`test`.`t1`.`c1`)
 DROP TABLE t1;
 CREATE TABLE t1 AS SELECT REPEAT('a', 10) AS c1 LIMIT 0;
 SHOW CREATE TABLE t1;
@@ -5553,7 +5553,7 @@ EXPLAIN EXTENDED SELECT * FROM t1 WHERE '% '=CONCAT(c1) AND 'a' LIKE CONCAT(c1);
 id	select_type	table	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	SIMPLE	t1	ALL	NULL	NULL	NULL	NULL	2	100.00	Using where
 Warnings:
-Note	1003	select `test`.`t1`.`c1` AS `c1` from `test`.`t1` where (('% ' = concat(`test`.`t1`.`c1`)) and ('a' like concat(`test`.`t1`.`c1`)))
+Note	1003	select `test`.`t1`.`c1` AS `c1` from `test`.`t1` where '% ' = concat(`test`.`t1`.`c1`) and 'a' like concat(`test`.`t1`.`c1`)
 DROP TABLE t1;
 CREATE TABLE t1 AS SELECT REPEAT('a', 10) AS c1 LIMIT 0;
 SHOW CREATE TABLE t1;
@@ -5576,7 +5576,7 @@ EXPLAIN EXTENDED SELECT * FROM t1 WHERE '%'=CONCAT(c1) AND 'a' LIKE CONCAT(c1);
 id	select_type	table	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	SIMPLE	t1	ALL	NULL	NULL	NULL	NULL	2	100.00	Using where
 Warnings:
-Note	1003	select `test`.`t1`.`c1` AS `c1` from `test`.`t1` where (('%' = concat(`test`.`t1`.`c1`)) and ('a' like concat(`test`.`t1`.`c1`)))
+Note	1003	select `test`.`t1`.`c1` AS `c1` from `test`.`t1` where '%' = concat(`test`.`t1`.`c1`) and 'a' like concat(`test`.`t1`.`c1`)
 DROP TABLE t1;
 #
 # MDEV-8694 Wrong result for SELECT..WHERE a NOT LIKE 'a ' AND a='a'
@@ -5598,7 +5598,7 @@ EXPLAIN EXTENDED SELECT a, LENGTH(a) FROM t1 WHERE a NOT LIKE 'a ' AND a='a';
 id	select_type	table	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	SIMPLE	t1	ALL	NULL	NULL	NULL	NULL	2	100.00	Using where
 Warnings:
-Note	1003	select `test`.`t1`.`a` AS `a`,length(`test`.`t1`.`a`) AS `LENGTH(a)` from `test`.`t1` where ((`test`.`t1`.`a` = 'a') and (not((`test`.`t1`.`a` like 'a '))))
+Note	1003	select `test`.`t1`.`a` AS `a`,length(`test`.`t1`.`a`) AS `LENGTH(a)` from `test`.`t1` where `test`.`t1`.`a` = 'a' and `test`.`t1`.`a`  not like 'a '
 DROP TABLE t1;
 #
 # End of MDEV-8694
@@ -5646,7 +5646,7 @@ SELECT * FROM t1 WHERE COALESCE(c,0)='3 ' AND COALESCE(d,0)=COALESCE(c,0);
 id	select_type	table	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	SIMPLE	t1	ALL	NULL	NULL	NULL	NULL	2	100.00	Using where
 Warnings:
-Note	1003	select `test`.`t1`.`a` AS `a`,`test`.`t1`.`b` AS `b`,`test`.`t1`.`c` AS `c`,`test`.`t1`.`d` AS `d` from `test`.`t1` where ((coalesce(`test`.`t1`.`c`,0) = '3 ') and (coalesce(`test`.`t1`.`d`,0) = '3 '))
+Note	1003	select `test`.`t1`.`a` AS `a`,`test`.`t1`.`b` AS `b`,`test`.`t1`.`c` AS `c`,`test`.`t1`.`d` AS `d` from `test`.`t1` where coalesce(`test`.`t1`.`c`,0) = '3 ' and coalesce(`test`.`t1`.`d`,0) = '3 '
 DROP TABLE t1;
 #
 # MDEV-9178 Wrong result for CAST(CONVERT('1Ĳ3' USING ucs2) AS SIGNED)
@@ -5659,4 +5659,631 @@ Warnings:
 Warning	1292	Truncated incorrect INTEGER value: '1Ĳ3'
 #
 # End of 10.1 tests
+#
+#
+# Start of 10.2 tests
+#
+#
+# MDEV-9711 NO PAD Collatons
+#
+SET character_set_connection=ucs2;
+SET STORAGE_ENGINE=MyISAM;
+#
+# Start of ctype_pad.inc
+#
+#
+# Unique indexes
+#
+CREATE TABLE t1 (a VARCHAR(10) PRIMARY KEY) COLLATE 'ucs2_general_nopad_ci';
+SHOW CREATE TABLE t1;
+Table	Create Table
+t1	CREATE TABLE `t1` (
+  `a` varchar(10) COLLATE ucs2_general_nopad_ci NOT NULL,
+  PRIMARY KEY (`a`)
+) ENGINE=MyISAM DEFAULT CHARSET=ucs2 COLLATE=ucs2_general_nopad_ci
+INSERT INTO t1 VALUES ('abc'),('abc  '),(' a'),(' a '),('a   ');
+SELECT HEX(a), a FROM t1 ORDER BY a;
+HEX(a)	a
+00200061	 a
+002000610020	 a 
+0061002000200020	a   
+006100620063	abc
+00610062006300200020	abc  
+SELECT HEX(a), a FROM t1 IGNORE INDEX(PRIMARY) ORDER BY a;
+HEX(a)	a
+00200061	 a
+002000610020	 a 
+0061002000200020	a   
+006100620063	abc
+00610062006300200020	abc  
+SELECT HEX(a), a FROM t1 IGNORE INDEX(PRIMARY) ORDER BY a DESC;
+HEX(a)	a
+00610062006300200020	abc  
+006100620063	abc
+0061002000200020	a   
+002000610020	 a 
+00200061	 a
+#
+# UNION
+#
+CREATE TABLE t2 (a VARCHAR(10)) COLLATE 'ucs2_general_nopad_ci';
+INSERT INTO t2 VALUES ('abc '),('abc  '),(' a'),('a ');
+SELECT HEX(a),a FROM (SELECT * FROM t1 UNION SELECT * FROM t2 ORDER BY a) td;
+HEX(a)	a
+00200061	 a
+002000610020	 a 
+00610020	a 
+0061002000200020	a   
+006100620063	abc
+0061006200630020	abc 
+00610062006300200020	abc  
+DROP TABLE t1;
+DROP TABLE t2;
+#
+# DISTINCT, COUNT, MAX
+#
+CREATE TABLE t1 (a VARCHAR(10)) COLLATE 'ucs2_general_nopad_ci';
+INSERT INTO t1 VALUES ('a'),('a  '),(' a'),(' a '),('a   ');
+SELECT HEX(a), a FROM (SELECT DISTINCT a FROM t1 ORDER BY a) td;
+HEX(a)	a
+00200061	 a
+002000610020	 a 
+0061	a
+006100200020	a  
+0061002000200020	a   
+SELECT COUNT(DISTINCT a) FROM t1 ORDER BY a;
+COUNT(DISTINCT a)
+5
+SELECT HEX(MAX(a)), MAX(a) FROM t1;
+HEX(MAX(a))	MAX(a)
+0061002000200020	a   
+#
+# GROUP BY
+#
+CREATE TABLE t2 (a VARCHAR(10), b int, c varchar(10)) COLLATE 'ucs2_general_nopad_ci';
+INSERT t2 values('ab', 12, 'cd'), ('ab', 2, 'ed'), ('aa', 20, 'er'), ('aa  ', 0, 'er ');
+SELECT HEX(a), cnt FROM (SELECT a, COUNT(a) AS cnt FROM t2 GROUP BY a ORDER BY a) AS td;
+HEX(a)	cnt
+00610061	1
+0061006100200020	1
+00610062	2
+DROP TABLE t2;
+#
+# Weights
+#
+SELECT HEX(WEIGHT_STRING(a AS CHAR(10))) FROM t1;
+HEX(WEIGHT_STRING(a AS CHAR(10)))
+0041000000000000000000000000000000000000
+0041002000200000000000000000000000000000
+0020004100000000000000000000000000000000
+0020004100200000000000000000000000000000
+0041002000200020000000000000000000000000
+DROP TABLE t1;
+#
+# IF, CASE, LEAST
+#
+SELECT IF('abc' COLLATE 'ucs2_general_nopad_ci' = 'abc ', 'pad', 'nopad');
+IF('abc' COLLATE 'ucs2_general_nopad_ci' = 'abc ', 'pad', 'nopad')
+nopad
+SELECT CASE 'abc' COLLATE 'ucs2_general_nopad_ci' WHEN 'abc ' THEN 'pad' ELSE 'nopad' END;
+CASE 'abc' COLLATE 'ucs2_general_nopad_ci' WHEN 'abc ' THEN 'pad' ELSE 'nopad' END
+nopad
+SELECT CASE WHEN 'abc' COLLATE 'ucs2_general_nopad_ci' = 'abc ' THEN 'pad' ELSE 'nopad' END;
+CASE WHEN 'abc' COLLATE 'ucs2_general_nopad_ci' = 'abc ' THEN 'pad' ELSE 'nopad' END
+nopad
+SELECT HEX(LEAST('abc ' COLLATE 'ucs2_general_nopad_ci', 'abc  '));
+HEX(LEAST('abc ' COLLATE 'ucs2_general_nopad_ci', 'abc  '))
+0061006200630020
+SELECT HEX(GREATEST('abc ' COLLATE 'ucs2_general_nopad_ci', 'abc  '));
+HEX(GREATEST('abc ' COLLATE 'ucs2_general_nopad_ci', 'abc  '))
+00610062006300200020
+#
+# Collation mix
+#
+CREATE TABLE t1 (a VARCHAR(10)) COLLATE 'ucs2_general_ci';
+INSERT INTO t1 VALUES ('a'),('a ');
+SELECT COUNT(*) FROM t1 WHERE a='a';
+COUNT(*)
+2
+SELECT COUNT(*) FROM t1 WHERE a='a' COLLATE 'ucs2_general_ci';
+COUNT(*)
+2
+SELECT COUNT(*) FROM t1 WHERE a='a' COLLATE 'ucs2_general_nopad_ci';
+COUNT(*)
+1
+ALTER TABLE t1 MODIFY a VARCHAR(10) COLLATE 'ucs2_general_nopad_ci';
+SELECT COUNT(*) FROM t1 WHERE a='a';
+COUNT(*)
+1
+SELECT COUNT(*) FROM t1 WHERE a='a' COLLATE 'ucs2_general_ci';
+COUNT(*)
+2
+SELECT COUNT(*) FROM t1 WHERE a='a' COLLATE 'ucs2_general_nopad_ci';
+COUNT(*)
+1
+DROP TABLE t1;
+#
+# End of ctype_pad.inc
+#
+SET STORAGE_ENGINE=HEAP;
+#
+# Start of ctype_pad.inc
+#
+#
+# Unique indexes
+#
+CREATE TABLE t1 (a VARCHAR(10) PRIMARY KEY) COLLATE 'ucs2_general_nopad_ci';
+SHOW CREATE TABLE t1;
+Table	Create Table
+t1	CREATE TABLE `t1` (
+  `a` varchar(10) COLLATE ucs2_general_nopad_ci NOT NULL,
+  PRIMARY KEY (`a`)
+) ENGINE=MEMORY DEFAULT CHARSET=ucs2 COLLATE=ucs2_general_nopad_ci
+INSERT INTO t1 VALUES ('abc'),('abc  '),(' a'),(' a '),('a   ');
+SELECT HEX(a), a FROM t1 ORDER BY a;
+HEX(a)	a
+00200061	 a
+002000610020	 a 
+0061002000200020	a   
+006100620063	abc
+00610062006300200020	abc  
+SELECT HEX(a), a FROM t1 IGNORE INDEX(PRIMARY) ORDER BY a;
+HEX(a)	a
+00200061	 a
+002000610020	 a 
+0061002000200020	a   
+006100620063	abc
+00610062006300200020	abc  
+SELECT HEX(a), a FROM t1 IGNORE INDEX(PRIMARY) ORDER BY a DESC;
+HEX(a)	a
+00610062006300200020	abc  
+006100620063	abc
+0061002000200020	a   
+002000610020	 a 
+00200061	 a
+#
+# UNION
+#
+CREATE TABLE t2 (a VARCHAR(10)) COLLATE 'ucs2_general_nopad_ci';
+INSERT INTO t2 VALUES ('abc '),('abc  '),(' a'),('a ');
+SELECT HEX(a),a FROM (SELECT * FROM t1 UNION SELECT * FROM t2 ORDER BY a) td;
+HEX(a)	a
+00200061	 a
+002000610020	 a 
+00610020	a 
+0061002000200020	a   
+006100620063	abc
+0061006200630020	abc 
+00610062006300200020	abc  
+DROP TABLE t1;
+DROP TABLE t2;
+#
+# DISTINCT, COUNT, MAX
+#
+CREATE TABLE t1 (a VARCHAR(10)) COLLATE 'ucs2_general_nopad_ci';
+INSERT INTO t1 VALUES ('a'),('a  '),(' a'),(' a '),('a   ');
+SELECT HEX(a), a FROM (SELECT DISTINCT a FROM t1 ORDER BY a) td;
+HEX(a)	a
+00200061	 a
+002000610020	 a 
+0061	a
+006100200020	a  
+0061002000200020	a   
+SELECT COUNT(DISTINCT a) FROM t1 ORDER BY a;
+COUNT(DISTINCT a)
+5
+SELECT HEX(MAX(a)), MAX(a) FROM t1;
+HEX(MAX(a))	MAX(a)
+0061002000200020	a   
+#
+# GROUP BY
+#
+CREATE TABLE t2 (a VARCHAR(10), b int, c varchar(10)) COLLATE 'ucs2_general_nopad_ci';
+INSERT t2 values('ab', 12, 'cd'), ('ab', 2, 'ed'), ('aa', 20, 'er'), ('aa  ', 0, 'er ');
+SELECT HEX(a), cnt FROM (SELECT a, COUNT(a) AS cnt FROM t2 GROUP BY a ORDER BY a) AS td;
+HEX(a)	cnt
+00610061	1
+0061006100200020	1
+00610062	2
+DROP TABLE t2;
+#
+# Weights
+#
+SELECT HEX(WEIGHT_STRING(a AS CHAR(10))) FROM t1;
+HEX(WEIGHT_STRING(a AS CHAR(10)))
+0041000000000000000000000000000000000000
+0041002000200000000000000000000000000000
+0020004100000000000000000000000000000000
+0020004100200000000000000000000000000000
+0041002000200020000000000000000000000000
+DROP TABLE t1;
+#
+# IF, CASE, LEAST
+#
+SELECT IF('abc' COLLATE 'ucs2_general_nopad_ci' = 'abc ', 'pad', 'nopad');
+IF('abc' COLLATE 'ucs2_general_nopad_ci' = 'abc ', 'pad', 'nopad')
+nopad
+SELECT CASE 'abc' COLLATE 'ucs2_general_nopad_ci' WHEN 'abc ' THEN 'pad' ELSE 'nopad' END;
+CASE 'abc' COLLATE 'ucs2_general_nopad_ci' WHEN 'abc ' THEN 'pad' ELSE 'nopad' END
+nopad
+SELECT CASE WHEN 'abc' COLLATE 'ucs2_general_nopad_ci' = 'abc ' THEN 'pad' ELSE 'nopad' END;
+CASE WHEN 'abc' COLLATE 'ucs2_general_nopad_ci' = 'abc ' THEN 'pad' ELSE 'nopad' END
+nopad
+SELECT HEX(LEAST('abc ' COLLATE 'ucs2_general_nopad_ci', 'abc  '));
+HEX(LEAST('abc ' COLLATE 'ucs2_general_nopad_ci', 'abc  '))
+0061006200630020
+SELECT HEX(GREATEST('abc ' COLLATE 'ucs2_general_nopad_ci', 'abc  '));
+HEX(GREATEST('abc ' COLLATE 'ucs2_general_nopad_ci', 'abc  '))
+00610062006300200020
+#
+# Collation mix
+#
+CREATE TABLE t1 (a VARCHAR(10)) COLLATE 'ucs2_general_ci';
+INSERT INTO t1 VALUES ('a'),('a ');
+SELECT COUNT(*) FROM t1 WHERE a='a';
+COUNT(*)
+2
+SELECT COUNT(*) FROM t1 WHERE a='a' COLLATE 'ucs2_general_ci';
+COUNT(*)
+2
+SELECT COUNT(*) FROM t1 WHERE a='a' COLLATE 'ucs2_general_nopad_ci';
+COUNT(*)
+1
+ALTER TABLE t1 MODIFY a VARCHAR(10) COLLATE 'ucs2_general_nopad_ci';
+SELECT COUNT(*) FROM t1 WHERE a='a';
+COUNT(*)
+1
+SELECT COUNT(*) FROM t1 WHERE a='a' COLLATE 'ucs2_general_ci';
+COUNT(*)
+2
+SELECT COUNT(*) FROM t1 WHERE a='a' COLLATE 'ucs2_general_nopad_ci';
+COUNT(*)
+1
+DROP TABLE t1;
+#
+# End of ctype_pad.inc
+#
+SET STORAGE_ENGINE=Default;
+SET STORAGE_ENGINE=MyISAM;
+#
+# Start of ctype_pad.inc
+#
+#
+# Unique indexes
+#
+CREATE TABLE t1 (a VARCHAR(10) PRIMARY KEY) COLLATE 'ucs2_nopad_bin';
+SHOW CREATE TABLE t1;
+Table	Create Table
+t1	CREATE TABLE `t1` (
+  `a` varchar(10) COLLATE ucs2_nopad_bin NOT NULL,
+  PRIMARY KEY (`a`)
+) ENGINE=MyISAM DEFAULT CHARSET=ucs2 COLLATE=ucs2_nopad_bin
+INSERT INTO t1 VALUES ('abc'),('abc  '),(' a'),(' a '),('a   ');
+SELECT HEX(a), a FROM t1 ORDER BY a;
+HEX(a)	a
+00200061	 a
+002000610020	 a 
+0061002000200020	a   
+006100620063	abc
+00610062006300200020	abc  
+SELECT HEX(a), a FROM t1 IGNORE INDEX(PRIMARY) ORDER BY a;
+HEX(a)	a
+00200061	 a
+002000610020	 a 
+0061002000200020	a   
+006100620063	abc
+00610062006300200020	abc  
+SELECT HEX(a), a FROM t1 IGNORE INDEX(PRIMARY) ORDER BY a DESC;
+HEX(a)	a
+00610062006300200020	abc  
+006100620063	abc
+0061002000200020	a   
+002000610020	 a 
+00200061	 a
+#
+# UNION
+#
+CREATE TABLE t2 (a VARCHAR(10)) COLLATE 'ucs2_nopad_bin';
+INSERT INTO t2 VALUES ('abc '),('abc  '),(' a'),('a ');
+SELECT HEX(a),a FROM (SELECT * FROM t1 UNION SELECT * FROM t2 ORDER BY a) td;
+HEX(a)	a
+00200061	 a
+002000610020	 a 
+00610020	a 
+0061002000200020	a   
+006100620063	abc
+0061006200630020	abc 
+00610062006300200020	abc  
+DROP TABLE t1;
+DROP TABLE t2;
+#
+# DISTINCT, COUNT, MAX
+#
+CREATE TABLE t1 (a VARCHAR(10)) COLLATE 'ucs2_nopad_bin';
+INSERT INTO t1 VALUES ('a'),('a  '),(' a'),(' a '),('a   ');
+SELECT HEX(a), a FROM (SELECT DISTINCT a FROM t1 ORDER BY a) td;
+HEX(a)	a
+00200061	 a
+002000610020	 a 
+0061	a
+006100200020	a  
+0061002000200020	a   
+SELECT COUNT(DISTINCT a) FROM t1 ORDER BY a;
+COUNT(DISTINCT a)
+5
+SELECT HEX(MAX(a)), MAX(a) FROM t1;
+HEX(MAX(a))	MAX(a)
+0061002000200020	a   
+#
+# GROUP BY
+#
+CREATE TABLE t2 (a VARCHAR(10), b int, c varchar(10)) COLLATE 'ucs2_nopad_bin';
+INSERT t2 values('ab', 12, 'cd'), ('ab', 2, 'ed'), ('aa', 20, 'er'), ('aa  ', 0, 'er ');
+SELECT HEX(a), cnt FROM (SELECT a, COUNT(a) AS cnt FROM t2 GROUP BY a ORDER BY a) AS td;
+HEX(a)	cnt
+00610061	1
+0061006100200020	1
+00610062	2
+DROP TABLE t2;
+#
+# Weights
+#
+SELECT HEX(WEIGHT_STRING(a AS CHAR(10))) FROM t1;
+HEX(WEIGHT_STRING(a AS CHAR(10)))
+0061000000000000000000000000000000000000
+0061002000200000000000000000000000000000
+0020006100000000000000000000000000000000
+0020006100200000000000000000000000000000
+0061002000200020000000000000000000000000
+DROP TABLE t1;
+#
+# IF, CASE, LEAST
+#
+SELECT IF('abc' COLLATE 'ucs2_nopad_bin' = 'abc ', 'pad', 'nopad');
+IF('abc' COLLATE 'ucs2_nopad_bin' = 'abc ', 'pad', 'nopad')
+nopad
+SELECT CASE 'abc' COLLATE 'ucs2_nopad_bin' WHEN 'abc ' THEN 'pad' ELSE 'nopad' END;
+CASE 'abc' COLLATE 'ucs2_nopad_bin' WHEN 'abc ' THEN 'pad' ELSE 'nopad' END
+nopad
+SELECT CASE WHEN 'abc' COLLATE 'ucs2_nopad_bin' = 'abc ' THEN 'pad' ELSE 'nopad' END;
+CASE WHEN 'abc' COLLATE 'ucs2_nopad_bin' = 'abc ' THEN 'pad' ELSE 'nopad' END
+nopad
+SELECT HEX(LEAST('abc ' COLLATE 'ucs2_nopad_bin', 'abc  '));
+HEX(LEAST('abc ' COLLATE 'ucs2_nopad_bin', 'abc  '))
+0061006200630020
+SELECT HEX(GREATEST('abc ' COLLATE 'ucs2_nopad_bin', 'abc  '));
+HEX(GREATEST('abc ' COLLATE 'ucs2_nopad_bin', 'abc  '))
+00610062006300200020
+#
+# Collation mix
+#
+CREATE TABLE t1 (a VARCHAR(10)) COLLATE 'ucs2_bin';
+INSERT INTO t1 VALUES ('a'),('a ');
+SELECT COUNT(*) FROM t1 WHERE a='a';
+COUNT(*)
+2
+SELECT COUNT(*) FROM t1 WHERE a='a' COLLATE 'ucs2_bin';
+COUNT(*)
+2
+SELECT COUNT(*) FROM t1 WHERE a='a' COLLATE 'ucs2_nopad_bin';
+COUNT(*)
+1
+ALTER TABLE t1 MODIFY a VARCHAR(10) COLLATE 'ucs2_nopad_bin';
+SELECT COUNT(*) FROM t1 WHERE a='a';
+COUNT(*)
+1
+SELECT COUNT(*) FROM t1 WHERE a='a' COLLATE 'ucs2_bin';
+COUNT(*)
+2
+SELECT COUNT(*) FROM t1 WHERE a='a' COLLATE 'ucs2_nopad_bin';
+COUNT(*)
+1
+DROP TABLE t1;
+#
+# End of ctype_pad.inc
+#
+SET STORAGE_ENGINE=HEAP;
+#
+# Start of ctype_pad.inc
+#
+#
+# Unique indexes
+#
+CREATE TABLE t1 (a VARCHAR(10) PRIMARY KEY) COLLATE 'ucs2_nopad_bin';
+SHOW CREATE TABLE t1;
+Table	Create Table
+t1	CREATE TABLE `t1` (
+  `a` varchar(10) COLLATE ucs2_nopad_bin NOT NULL,
+  PRIMARY KEY (`a`)
+) ENGINE=MEMORY DEFAULT CHARSET=ucs2 COLLATE=ucs2_nopad_bin
+INSERT INTO t1 VALUES ('abc'),('abc  '),(' a'),(' a '),('a   ');
+SELECT HEX(a), a FROM t1 ORDER BY a;
+HEX(a)	a
+00200061	 a
+002000610020	 a 
+0061002000200020	a   
+006100620063	abc
+00610062006300200020	abc  
+SELECT HEX(a), a FROM t1 IGNORE INDEX(PRIMARY) ORDER BY a;
+HEX(a)	a
+00200061	 a
+002000610020	 a 
+0061002000200020	a   
+006100620063	abc
+00610062006300200020	abc  
+SELECT HEX(a), a FROM t1 IGNORE INDEX(PRIMARY) ORDER BY a DESC;
+HEX(a)	a
+00610062006300200020	abc  
+006100620063	abc
+0061002000200020	a   
+002000610020	 a 
+00200061	 a
+#
+# UNION
+#
+CREATE TABLE t2 (a VARCHAR(10)) COLLATE 'ucs2_nopad_bin';
+INSERT INTO t2 VALUES ('abc '),('abc  '),(' a'),('a ');
+SELECT HEX(a),a FROM (SELECT * FROM t1 UNION SELECT * FROM t2 ORDER BY a) td;
+HEX(a)	a
+00200061	 a
+002000610020	 a 
+00610020	a 
+0061002000200020	a   
+006100620063	abc
+0061006200630020	abc 
+00610062006300200020	abc  
+DROP TABLE t1;
+DROP TABLE t2;
+#
+# DISTINCT, COUNT, MAX
+#
+CREATE TABLE t1 (a VARCHAR(10)) COLLATE 'ucs2_nopad_bin';
+INSERT INTO t1 VALUES ('a'),('a  '),(' a'),(' a '),('a   ');
+SELECT HEX(a), a FROM (SELECT DISTINCT a FROM t1 ORDER BY a) td;
+HEX(a)	a
+00200061	 a
+002000610020	 a 
+0061	a
+006100200020	a  
+0061002000200020	a   
+SELECT COUNT(DISTINCT a) FROM t1 ORDER BY a;
+COUNT(DISTINCT a)
+5
+SELECT HEX(MAX(a)), MAX(a) FROM t1;
+HEX(MAX(a))	MAX(a)
+0061002000200020	a   
+#
+# GROUP BY
+#
+CREATE TABLE t2 (a VARCHAR(10), b int, c varchar(10)) COLLATE 'ucs2_nopad_bin';
+INSERT t2 values('ab', 12, 'cd'), ('ab', 2, 'ed'), ('aa', 20, 'er'), ('aa  ', 0, 'er ');
+SELECT HEX(a), cnt FROM (SELECT a, COUNT(a) AS cnt FROM t2 GROUP BY a ORDER BY a) AS td;
+HEX(a)	cnt
+00610061	1
+0061006100200020	1
+00610062	2
+DROP TABLE t2;
+#
+# Weights
+#
+SELECT HEX(WEIGHT_STRING(a AS CHAR(10))) FROM t1;
+HEX(WEIGHT_STRING(a AS CHAR(10)))
+0061000000000000000000000000000000000000
+0061002000200000000000000000000000000000
+0020006100000000000000000000000000000000
+0020006100200000000000000000000000000000
+0061002000200020000000000000000000000000
+DROP TABLE t1;
+#
+# IF, CASE, LEAST
+#
+SELECT IF('abc' COLLATE 'ucs2_nopad_bin' = 'abc ', 'pad', 'nopad');
+IF('abc' COLLATE 'ucs2_nopad_bin' = 'abc ', 'pad', 'nopad')
+nopad
+SELECT CASE 'abc' COLLATE 'ucs2_nopad_bin' WHEN 'abc ' THEN 'pad' ELSE 'nopad' END;
+CASE 'abc' COLLATE 'ucs2_nopad_bin' WHEN 'abc ' THEN 'pad' ELSE 'nopad' END
+nopad
+SELECT CASE WHEN 'abc' COLLATE 'ucs2_nopad_bin' = 'abc ' THEN 'pad' ELSE 'nopad' END;
+CASE WHEN 'abc' COLLATE 'ucs2_nopad_bin' = 'abc ' THEN 'pad' ELSE 'nopad' END
+nopad
+SELECT HEX(LEAST('abc ' COLLATE 'ucs2_nopad_bin', 'abc  '));
+HEX(LEAST('abc ' COLLATE 'ucs2_nopad_bin', 'abc  '))
+0061006200630020
+SELECT HEX(GREATEST('abc ' COLLATE 'ucs2_nopad_bin', 'abc  '));
+HEX(GREATEST('abc ' COLLATE 'ucs2_nopad_bin', 'abc  '))
+00610062006300200020
+#
+# Collation mix
+#
+CREATE TABLE t1 (a VARCHAR(10)) COLLATE 'ucs2_bin';
+INSERT INTO t1 VALUES ('a'),('a ');
+SELECT COUNT(*) FROM t1 WHERE a='a';
+COUNT(*)
+2
+SELECT COUNT(*) FROM t1 WHERE a='a' COLLATE 'ucs2_bin';
+COUNT(*)
+2
+SELECT COUNT(*) FROM t1 WHERE a='a' COLLATE 'ucs2_nopad_bin';
+COUNT(*)
+1
+ALTER TABLE t1 MODIFY a VARCHAR(10) COLLATE 'ucs2_nopad_bin';
+SELECT COUNT(*) FROM t1 WHERE a='a';
+COUNT(*)
+1
+SELECT COUNT(*) FROM t1 WHERE a='a' COLLATE 'ucs2_bin';
+COUNT(*)
+2
+SELECT COUNT(*) FROM t1 WHERE a='a' COLLATE 'ucs2_nopad_bin';
+COUNT(*)
+1
+DROP TABLE t1;
+#
+# End of ctype_pad.inc
+#
+SET STORAGE_ENGINE=Default;
+#
+# MDEV-10585 EXECUTE IMMEDIATE statement
+#
+SET character_set_connection=ucs2;
+EXECUTE IMMEDIATE 'SELECT COLLATION("a")';
+COLLATION("a")
+ucs2_general_ci
+SET @stmt='SELECT COLLATION("a")';
+EXECUTE IMMEDIATE @stmt;
+COLLATION("a")
+ucs2_general_ci
+#
+# MDEV-10866 Extend PREPARE and EXECUTE IMMEDIATE to understand expressions
+#
+SET NAMES utf8, collation_connection=ucs2_bin;
+SET @stmt='SELECT COLLATION(''a'')';
+EXECUTE IMMEDIATE @stmt;
+COLLATION('a')
+ucs2_bin
+SET NAMES utf8, character_set_connection=ucs2;
+SET @stmt='SELECT COLLATION(''a'')';
+EXECUTE IMMEDIATE @stmt;
+COLLATION('a')
+ucs2_general_ci
+EXECUTE IMMEDIATE CONCAT('SELECT ''a'' FROM DUAL');
+a
+a
+SELECT HEX('aä') FROM DUAL;
+HEX('aä')
+006100E4
+EXECUTE IMMEDIATE 'SELECT HEX(''aä'') FROM DUAL';
+HEX('aä')
+006100E4
+EXECUTE IMMEDIATE CONCAT('SELECT HEX(''aä'') FROM DUAL');
+HEX('aä')
+006100E4
+EXECUTE IMMEDIATE CONCAT('SELECT HEX(''aä'') FROM ', 'DUAL');
+HEX('aä')
+006100E4
+PREPARE stmt FROM 'SELECT HEX(''aä'') FROM DUAL';
+EXECUTE stmt;
+HEX('aä')
+006100E4
+DEALLOCATE PREPARE stmt;
+SET @table='DUAL';
+SELECT HEX(@table);
+HEX(@table)
+004400550041004C
+EXECUTE IMMEDIATE CONCAT('SELECT HEX(''aä'') FROM ', @table);
+HEX('aä')
+006100E4
+EXECUTE IMMEDIATE CONCAT('SELECT HEX(''aä'') FROM ', CONVERT(@table USING utf8));
+HEX('aä')
+006100E4
+SET @stmt='SELECT HEX(''aä'') FROM DUAL';
+EXECUTE IMMEDIATE @stmt;
+HEX('aä')
+006100E4
+PREPARE stmt FROM @stmt;
+EXECUTE stmt;
+HEX('aä')
+006100E4
+DEALLOCATE PREPARE stmt;
+#
+# End of 10.2 tests
 #

@@ -1,6 +1,6 @@
 /***********************************************************************
 
-Copyright (c) 1995, 2015, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 1995, 2016, Oracle and/or its affiliates. All Rights Reserved.
 Copyright (c) 2009, Percona Inc.
 Copyright (c) 2013, 2016, MariaDB Corporation.
 
@@ -920,7 +920,7 @@ os_file_handle_error_cond_exit(
 		}
 
 		if (should_exit) {
-			exit(1);
+			abort();
 		}
 	}
 
@@ -1817,11 +1817,11 @@ void
 os_file_set_nocache(
 /*================*/
 	os_file_t fd		/*!< in: file descriptor to alter */
-					__attribute__((unused)),
+					MY_ATTRIBUTE((unused)),
 	const char*	file_name	/*!< in: used in the diagnostic
 					message */
-					__attribute__((unused)),
-	const char*	operation_name __attribute__((unused)))
+					MY_ATTRIBUTE((unused)),
+	const char*	operation_name MY_ATTRIBUTE((unused)))
 					/*!< in: "open" or "create"; used
 					in the diagnostic message */
 {
@@ -1873,14 +1873,14 @@ short_warning:
 Tries to enable the atomic write feature, if available, for the specified file
 handle.
 @return TRUE if success */
-static __attribute__((warn_unused_result))
+static MY_ATTRIBUTE((warn_unused_result))
 ibool
 os_file_set_atomic_writes(
 /*======================*/
 	const char*	name	/*!< in: name of the file */
-	__attribute__((unused)),
+	MY_ATTRIBUTE((unused)),
 	os_file_t	file	/*!< in: handle to the file */
-	__attribute__((unused)))
+	MY_ATTRIBUTE((unused)))
 
 {
 #ifdef DFS_IOCTL_ATOMIC_WRITE_SET
@@ -2826,7 +2826,7 @@ os_file_flush_func(
 /*******************************************************************//**
 Does a synchronous read operation in Posix.
 @return	number of bytes read, -1 if error */
-static __attribute__((nonnull(2), warn_unused_result))
+static MY_ATTRIBUTE((nonnull(2), warn_unused_result))
 ssize_t
 os_file_pread(
 /*==========*/
@@ -2989,7 +2989,7 @@ os_file_pread(
 /*******************************************************************//**
 Does a synchronous write operation in Posix.
 @return	number of bytes written, -1 if error */
-static __attribute__((nonnull, warn_unused_result))
+static MY_ATTRIBUTE((nonnull, warn_unused_result))
 ssize_t
 os_file_pwrite(
 /*===========*/
@@ -6419,7 +6419,7 @@ os_file_trim(
 		fprintf(stderr,
 			"  InnoDB: Warning: fallocate call failed with error code %d.\n"
 			"  InnoDB: start: %lu len: %lu payload: %lu\n"
-			"  InnoDB: Disabling fallocate for now.\n", errno, off, trim_len, len);
+			"  InnoDB: Disabling fallocate for now.\n", errno, (ulong) off, (ulong) trim_len, (ulong) len);
 
 		os_file_handle_error_no_exit(slot->name,
 			" fallocate(FALLOC_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE) ",

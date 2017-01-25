@@ -39,15 +39,9 @@ static Log_event* wsrep_read_log_event(
   const char *error= 0;
   Log_event *res=  0;
 
-  if (data_len > wsrep_max_ws_size)
-  {
-    error = "Event too big";
-    goto err;
-  }
+  res= Log_event::read_log_event(buf, data_len, &error, description_event,
+                                 true);
 
-  res= Log_event::read_log_event(buf, data_len, &error, description_event, true);
-
-err:
   if (!res)
   {
     DBUG_ASSERT(error != 0);
@@ -62,7 +56,6 @@ err:
 
 #include "transaction.h" // trans_commit(), trans_rollback()
 #include "rpl_rli.h"     // class Relay_log_info;
-#include "sql_base.h"    // close_temporary_table()
 
 void wsrep_set_apply_format(THD* thd, Format_description_log_event* ev)
 {
@@ -79,6 +72,9 @@ Format_description_log_event* wsrep_get_apply_format(THD* thd)
   {
     return (Format_description_log_event*) thd->wsrep_apply_format;
   }
+
+  DBUG_ASSERT(thd->wsrep_rgi);
+
   return thd->wsrep_rgi->rli->relay_log.description_event_for_exec;
 }
 
@@ -253,6 +249,9 @@ wsrep_cb_status_t wsrep_apply_cb(void* const             ctx,
   else
     thd->variables.option_bits&= ~OPTION_NO_FOREIGN_KEY_CHECKS;
 
+  /* With galera we assume that the master has done the constraint checks */
+  thd->variables.option_bits|= OPTION_NO_CHECK_CONSTRAINT_CHECKS;
+
   if (flags & WSREP_FLAG_ISOLATION)
   {
     thd->wsrep_apply_toi= true;
@@ -277,14 +276,11 @@ wsrep_cb_status_t wsrep_apply_cb(void* const             ctx,
     wsrep_dump_rbr_buf_with_header(thd, buf, buf_len);
   }
 
-  TABLE *tmp;
-  while ((tmp = thd->temporary_tables))
+  if (thd->has_thd_temporary_tables())
   {
-    WSREP_DEBUG("Applier %lu, has temporary tables: %s.%s",
-		thd->thread_id,
-		(tmp->s) ? tmp->s->db.str : "void",
-		(tmp->s) ? tmp->s->table_name.str : "void");
-    close_temporary_table(thd, tmp, 1, 1);
+    WSREP_DEBUG("Applier %lld has temporary tables. Closing them now..",
+                thd->thread_id);
+    thd->close_temporary_tables();
   }
 
   return rcode;
@@ -368,8 +364,10 @@ wsrep_cb_status_t wsrep_commit_cb(void*         const     ctx,
   else
     rcode = wsrep_rollback(thd);
 
+  /* Cleanup */
   wsrep_set_apply_format(thd, NULL);
   thd->mdl_context.release_transactional_locks();
+  thd->reset_query();                           /* Mutex protected */
   free_root(thd->mem_root,MYF(MY_KEEP_PREALLOC));
   thd->tx_isolation= (enum_tx_isolation) thd->variables.tx_isolation;
 

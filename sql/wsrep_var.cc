@@ -26,14 +26,6 @@
 #include <cstdio>
 #include <cstdlib>
 
-const  char* wsrep_provider         = 0;
-const  char* wsrep_provider_options = 0;
-const  char* wsrep_cluster_address  = 0;
-const  char* wsrep_cluster_name     = 0;
-const  char* wsrep_node_name        = 0;
-const  char* wsrep_node_address     = 0;
-const  char* wsrep_node_incoming_address = 0;
-const  char* wsrep_start_position   = 0;
 
 int wsrep_init_vars()
 {
@@ -45,8 +37,6 @@ int wsrep_init_vars()
   wsrep_node_address    = my_strdup("", MYF(MY_WME));
   wsrep_node_incoming_address= my_strdup(WSREP_NODE_INCOMING_AUTO, MYF(MY_WME));
   wsrep_start_position  = my_strdup(WSREP_START_POSITION_ZERO, MYF(MY_WME));
-
-  global_system_variables.binlog_format=BINLOG_FORMAT_ROW;
   return 0;
 }
 
@@ -81,31 +71,67 @@ bool wsrep_sync_wait_update (sys_var* self, THD* thd, enum_var_type var_type)
   return false;
 }
 
-static int wsrep_start_position_verify (const char* start_str)
+
+/*
+  Verify the format of the given UUID:seqno.
+
+  @return
+    true                    Fail
+    false                   Pass
+*/
+static
+bool wsrep_start_position_verify (const char* start_str)
 {
   size_t        start_len;
   wsrep_uuid_t  uuid;
   ssize_t       uuid_len;
 
+  // Check whether it has minimum acceptable length.
   start_len = strlen (start_str);
   if (start_len < 34)
-    return 1;
+    return true;
 
+  /*
+    Parse the input to check whether UUID length is acceptable
+    and seqno has been provided.
+  */
   uuid_len = wsrep_uuid_scan (start_str, start_len, &uuid);
   if (uuid_len < 0 || (start_len - uuid_len) < 2)
-    return 1;
+    return true;
 
-  if (start_str[uuid_len] != ':') // separator should follow UUID
-    return 1;
+  // Separator must follow the UUID.
+  if (start_str[uuid_len] != ':')
+    return true;
 
   char* endptr;
   wsrep_seqno_t const seqno __attribute__((unused)) // to avoid GCC warnings
     (strtoll(&start_str[uuid_len + 1], &endptr, 10));
 
-  if (*endptr == '\0') return 0; // remaining string was seqno
+  // Remaining string was seqno.
+  if (*endptr == '\0') return false;
 
-  return 1;
+  return true;
 }
+
+
+static
+bool wsrep_set_local_position(const char* const value, size_t length,
+                              bool const sst)
+{
+  wsrep_uuid_t uuid;
+  size_t const uuid_len = wsrep_uuid_scan(value, length, &uuid);
+  wsrep_seqno_t const seqno = strtoll(value + uuid_len + 1, NULL, 10);
+
+  if (sst) {
+    return wsrep_sst_received (wsrep, uuid, seqno, NULL, 0, false);
+  } else {
+    // initialization
+    local_uuid = uuid;
+    local_seqno = seqno;
+  }
+  return false;
+}
+
 
 bool wsrep_start_position_check (sys_var *self, THD* thd, set_var* var)
 {
@@ -119,64 +145,94 @@ bool wsrep_start_position_check (sys_var *self, THD* thd, set_var* var)
          var->save_result.string_value.length);
   start_pos_buf[var->save_result.string_value.length]= 0;
 
-  if (!wsrep_start_position_verify(start_pos_buf)) return 0;
+  // Verify the format.
+  if (wsrep_start_position_verify(start_pos_buf)) return true;
+
+  /*
+    As part of further verification, we try to update the value and catch
+    errors (if any).
+  */
+  if (wsrep_set_local_position(var->save_result.string_value.str,
+                               var->save_result.string_value.length,
+                               true))
+  {
+    goto err;
+  }
+
+  return false;
 
 err:
   my_error(ER_WRONG_VALUE_FOR_VAR, MYF(0), var->var->name.str,
            var->save_result.string_value.str ?
            var->save_result.string_value.str : "NULL");
-  return 1;
-}
-
-static
-void wsrep_set_local_position(const char* const value, bool const sst)
-{
-  size_t const value_len = strlen(value);
-  wsrep_uuid_t uuid;
-  size_t const uuid_len = wsrep_uuid_scan(value, value_len, &uuid);
-  wsrep_seqno_t const seqno = strtoll(value + uuid_len + 1, NULL, 10);
-
-  if (sst) {
-    wsrep_sst_received (wsrep, uuid, seqno, NULL, 0);
-  } else {
-    // initialization
-    local_uuid = uuid;
-    local_seqno = seqno;
-  }
+  return true;
 }
 
 bool wsrep_start_position_update (sys_var *self, THD* thd, enum_var_type type)
 {
-  WSREP_INFO ("wsrep_start_position var submitted: '%s'",
-              wsrep_start_position);
-  // since this value passed wsrep_start_position_check, don't check anything
-  // here
-  wsrep_set_local_position (wsrep_start_position, true);
-  return 0;
+  // Print a confirmation that wsrep_start_position has been updated.
+  WSREP_INFO ("wsrep_start_position set to '%s'", wsrep_start_position);
+  return false;
 }
 
-void wsrep_start_position_init (const char* val)
+bool wsrep_start_position_init (const char* val)
 {
   if (NULL == val || wsrep_start_position_verify (val))
   {
     WSREP_ERROR("Bad initial value for wsrep_start_position: %s", 
                 (val ? val : ""));
-    return;
+    return true;
   }
 
-  wsrep_set_local_position (val, false);
+  if (wsrep_set_local_position (val, strlen(val), false))
+  {
+    WSREP_ERROR("Failed to set initial wsep_start_position: %s", val);
+    return true;
+  }
+
+  return false;
+}
+
+static int get_provider_option_value(const char* opts,
+                                     const char* opt_name,
+                                     ulong* opt_value)
+{
+  int ret= 1;
+  ulong opt_value_tmp;
+  char *opt_value_str, *s, *opts_copy= my_strdup(opts, MYF(MY_WME));
+
+  if ((opt_value_str= strstr(opts_copy, opt_name)) == NULL)
+    goto end;
+  opt_value_str= strtok_r(opt_value_str, "=", &s);
+  if (opt_value_str == NULL) goto end;
+  opt_value_str= strtok_r(NULL, ";", &s);
+  if (opt_value_str == NULL) goto end;
+
+  opt_value_tmp= strtoul(opt_value_str, NULL, 10);
+  if (errno == ERANGE) goto end;
+
+  *opt_value= opt_value_tmp;
+  ret= 0;
+
+end:
+  my_free(opts_copy);
+  return ret;
 }
 
 static bool refresh_provider_options()
 {
+  DBUG_ASSERT(wsrep);
+
   WSREP_DEBUG("refresh_provider_options: %s", 
               (wsrep_provider_options) ? wsrep_provider_options : "null");
   char* opts= wsrep->options_get(wsrep);
   if (opts)
   {
-    if (wsrep_provider_options) my_free((void *)wsrep_provider_options);
-    wsrep_provider_options = (char*)my_memdup(opts, strlen(opts) + 1, 
-                                              MYF(MY_WME));
+    wsrep_provider_options_init(opts);
+    get_provider_option_value(wsrep_provider_options,
+                              (char*)"repl.max_ws_size",
+                              &wsrep_max_ws_size);
+    free(opts);
   }
   else
   {
@@ -291,17 +347,17 @@ void wsrep_provider_init (const char* value)
 
 bool wsrep_provider_options_check(sys_var *self, THD* thd, set_var* var)
 {
-  return 0;
-}
-
-bool wsrep_provider_options_update(sys_var *self, THD* thd, enum_var_type type)
-{
   if (wsrep == NULL)
   {
     my_message(ER_WRONG_ARGUMENTS, "WSREP (galera) not started", MYF(0));
     return true;
   }
+  return false;
+}
 
+bool wsrep_provider_options_update(sys_var *self, THD* thd, enum_var_type type)
+{
+  DBUG_ASSERT(wsrep);
   wsrep_status_t ret= wsrep->options_set(wsrep, wsrep_provider_options);
   if (ret != WSREP_OK)
   {
@@ -330,14 +386,14 @@ bool wsrep_cluster_address_check (sys_var *self, THD* thd, set_var* var)
   char addr_buf[FN_REFLEN];
 
   if ((! var->save_result.string_value.str) ||
-      (var->save_result.string_value.length > (FN_REFLEN - 1))) // safety
+      (var->save_result.string_value.length >= sizeof(addr_buf))) // safety
     goto err;
 
-  memcpy(addr_buf, var->save_result.string_value.str,
-         var->save_result.string_value.length);
-  addr_buf[var->save_result.string_value.length]= 0;
+  strmake(addr_buf, var->save_result.string_value.str,
+          MY_MIN(sizeof(addr_buf)-1, var->save_result.string_value.length));
 
-  if (!wsrep_cluster_address_verify(addr_buf)) return 0;
+  if (!wsrep_cluster_address_verify(addr_buf))
+    return 0;
 
  err:
   my_error(ER_WRONG_VALUE_FOR_VAR, MYF(0), var->var->name.str,
@@ -395,8 +451,8 @@ void wsrep_cluster_address_init (const char* value)
               (wsrep_cluster_address) ? wsrep_cluster_address : "null", 
               (value) ? value : "null");
 
-  if (wsrep_cluster_address) my_free ((void*)wsrep_cluster_address);
-  wsrep_cluster_address = (value) ? my_strdup(value, MYF(0)) : NULL;
+  my_free((void*) wsrep_cluster_address);
+  wsrep_cluster_address= my_strdup(value ? value : "", MYF(0));
 }
 
 /* wsrep_cluster_name cannot be NULL or an empty string. */
@@ -494,6 +550,12 @@ bool wsrep_slave_threads_update (sys_var *self, THD* thd, enum_var_type type)
 
 bool wsrep_desync_check (sys_var *self, THD* thd, set_var* var)
 {
+  if (wsrep == NULL)
+  {
+    my_message(ER_WRONG_ARGUMENTS, "WSREP (galera) not started", MYF(0));
+    return true;
+  }
+
   bool new_wsrep_desync= (bool) var->save_result.ulonglong_value;
   if (wsrep_desync == new_wsrep_desync) {
     if (new_wsrep_desync) {
@@ -505,20 +567,10 @@ bool wsrep_desync_check (sys_var *self, THD* thd, set_var* var)
                    ER_WRONG_VALUE_FOR_VAR,
                    "'wsrep_desync' is already OFF.");
     }
+    return false;
   }
-  return 0;
-}
-
-bool wsrep_desync_update (sys_var *self, THD* thd, enum_var_type type)
-{
-  if (wsrep == NULL)
-  {
-    my_message(ER_WRONG_ARGUMENTS, "WSREP (galera) not started", MYF(0));
-    return true;
-  }
-
   wsrep_status_t ret(WSREP_WARNING);
-  if (wsrep_desync) {
+  if (new_wsrep_desync) {
     ret = wsrep->desync (wsrep);
     if (ret != WSREP_OK) {
       WSREP_WARN ("SET desync failed %d for schema: %s, query: %s", ret,
@@ -538,6 +590,39 @@ bool wsrep_desync_update (sys_var *self, THD* thd, enum_var_type type)
     }
   }
   return false;
+}
+
+bool wsrep_desync_update (sys_var *self, THD* thd, enum_var_type type)
+{
+  DBUG_ASSERT(wsrep);
+  return false;
+}
+
+bool wsrep_max_ws_size_check(sys_var *self, THD* thd, set_var* var)
+{
+  if (wsrep == NULL)
+  {
+    my_message(ER_WRONG_ARGUMENTS, "WSREP (galera) not started", MYF(0));
+    return true;
+  }
+  return false;
+}
+
+bool wsrep_max_ws_size_update (sys_var *self, THD *thd, enum_var_type)
+{
+  DBUG_ASSERT(wsrep);
+
+  char max_ws_size_opt[128];
+  my_snprintf(max_ws_size_opt, sizeof(max_ws_size_opt),
+              "repl.max_ws_size=%d", wsrep_max_ws_size);
+  wsrep_status_t ret= wsrep->options_set(wsrep, max_ws_size_opt);
+  if (ret != WSREP_OK)
+  {
+    WSREP_ERROR("Set options returned %d", ret);
+    refresh_provider_options();
+    return true;
+  }
+  return refresh_provider_options();
 }
 
 static SHOW_VAR wsrep_status_vars[]=
@@ -585,7 +670,7 @@ int wsrep_show_status (THD *thd, SHOW_VAR *var, char *buff,
       v->name = thd->strdup(sv->name);
       switch (sv->type) {
       case WSREP_VAR_INT64:
-        v->value = (char*)thd->memdup(&sv->value._int64, sizeof(longlong));
+        v->value = (char*)thd->memdup(&sv->value._integer64, sizeof(longlong));
         v->type  = SHOW_LONGLONG;
         break;
       case WSREP_VAR_STRING:

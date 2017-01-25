@@ -1,6 +1,6 @@
 /*
    Copyright (c) 2000, 2014, Oracle and/or its affiliates.
-   Copyright (c) 2009, 2015, MariaDB
+   Copyright (c) 2009, 2016, MariaDB Corporation
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -815,7 +815,7 @@ static bool
 mysql_rm_db_internal(THD *thd,char *db, bool if_exists, bool silent)
 {
   ulong deleted_tables= 0;
-  bool error= true;
+  bool error= true, rm_mysql_schema;
   char	path[FN_REFLEN + 16];
   MY_DIR *dirp;
   uint length;
@@ -840,6 +840,18 @@ mysql_rm_db_internal(THD *thd,char *db, bool if_exists, bool silent)
   length= build_table_filename(path, sizeof(path) - 1, db, "", "", 0);
   strmov(path+length, MY_DB_OPT_FILE);		// Append db option file name
   del_dbopt(path);				// Remove dboption hash entry
+  /*
+     Now remove the db.opt file.
+     The 'find_db_tables_and_rm_known_files' doesn't remove this file
+     if there exists a table with the name 'db', so let's just do it
+     separately. We know this file exists and needs to be deleted anyway.
+  */
+  if (my_delete_with_symlink(path, MYF(0)) && my_errno != ENOENT)
+  {
+    my_error(EE_DELETE, MYF(0), path, my_errno);
+    DBUG_RETURN(true);
+  }
+    
   path[length]= '\0';				// Remove file name
 
   /* See if the directory exists */
@@ -867,7 +879,8 @@ mysql_rm_db_internal(THD *thd,char *db, bool if_exists, bool silent)
     Disable drop of enabled log tables, must be done before name locking.
     This check is only needed if we are dropping the "mysql" database.
   */
-  if ((my_strcasecmp(system_charset_info, MYSQL_SCHEMA_NAME.str, db) == 0))
+  if ((rm_mysql_schema=
+        (my_strcasecmp(system_charset_info, MYSQL_SCHEMA_NAME.str, db) == 0)))
   {
     for (table= tables; table; table= table->next_local)
       if (check_if_log_table(table, TRUE, "DROP"))
@@ -880,13 +893,14 @@ mysql_rm_db_internal(THD *thd,char *db, bool if_exists, bool silent)
       lock_db_routines(thd, dbnorm))
     goto exit;
 
-  if (!in_bootstrap)
+  if (!in_bootstrap && !rm_mysql_schema)
   {
     for (table= tables; table; table= table->next_local)
     {
       LEX_STRING db_name= { table->db, table->db_length };
       LEX_STRING table_name= { table->table_name, table->table_name_length };
-      if (table->open_type == OT_BASE_ONLY || !find_temporary_table(thd, table))
+      if (table->open_type == OT_BASE_ONLY ||
+          !thd->find_temporary_table(table))
         (void) delete_statistics_for_table(thd, &db_name, &table_name);
     }
   }
@@ -920,10 +934,13 @@ mysql_rm_db_internal(THD *thd,char *db, bool if_exists, bool silent)
     ha_drop_database(path);
     tmp_disable_binlog(thd);
     query_cache_invalidate1(thd, dbnorm);
-    (void) sp_drop_db_routines(thd, dbnorm); /* @todo Do not ignore errors */
+    if (!rm_mysql_schema)
+    {
+      (void) sp_drop_db_routines(thd, dbnorm); /* @todo Do not ignore errors */
 #ifdef HAVE_EVENT_SCHEDULER
-    Events::drop_schema_events(thd, dbnorm);
+      Events::drop_schema_events(thd, dbnorm);
 #endif
+    }
     reenable_binlog(thd);
 
     /*
@@ -1034,7 +1051,10 @@ exit:
     it to 0.
   */
   if (thd->db && cmp_db_names(thd->db, db) && !error)
+  {
     mysql_change_db_impl(thd, NULL, 0, thd->variables.collation_server);
+    SESSION_TRACKER_CHANGED(thd, CURRENT_SCHEMA_TRACKER, NULL);
+  }
   my_dirend(dirp);
   DBUG_RETURN(error);
 }
@@ -1458,7 +1478,7 @@ bool mysql_change_db(THD *thd, const LEX_STRING *new_db_name, bool force_switch)
 
       mysql_change_db_impl(thd, NULL, 0, thd->variables.collation_server);
 
-      DBUG_RETURN(FALSE);
+      goto done;
     }
     else
     {
@@ -1475,8 +1495,7 @@ bool mysql_change_db(THD *thd, const LEX_STRING *new_db_name, bool force_switch)
 
     mysql_change_db_impl(thd, &INFORMATION_SCHEMA_NAME, SELECT_ACL,
                          system_charset_info);
-
-    DBUG_RETURN(FALSE);
+    goto done;
   }
 
   /*
@@ -1563,8 +1582,7 @@ bool mysql_change_db(THD *thd, const LEX_STRING *new_db_name, bool force_switch)
       mysql_change_db_impl(thd, NULL, 0, thd->variables.collation_server);
 
       /* The operation succeed. */
-
-      DBUG_RETURN(FALSE);
+      goto done;
     }
     else
     {
@@ -1588,6 +1606,9 @@ bool mysql_change_db(THD *thd, const LEX_STRING *new_db_name, bool force_switch)
 
   mysql_change_db_impl(thd, &new_db_file_name, db_access, db_default_cl);
 
+done:
+  SESSION_TRACKER_CHANGED(thd, CURRENT_SCHEMA_TRACKER, NULL);
+  SESSION_TRACKER_CHANGED(thd, SESSION_STATE_CHANGE_TRACKER, NULL);
   DBUG_RETURN(FALSE);
 }
 
@@ -1777,7 +1798,7 @@ bool mysql_upgrade_db(THD *thd, LEX_STRING *old_db)
       create trigger trg1 before insert on t2 for each row set @a:=1
       rename database d1 to d2;
 
-    TODO: Triggers, having the renamed database explicitely written
+    TODO: Triggers, having the renamed database explicitly written
     in the table qualifiers.
     1. when the same database is renamed:
         create trigger d1.trg1 before insert on d1.t1 for each row set @a:=1;

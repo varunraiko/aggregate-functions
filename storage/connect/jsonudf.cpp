@@ -30,6 +30,10 @@
 uint GetJsonGrpSize(void);
 static int IsJson(UDF_ARGS *args, uint i);
 static PSZ MakePSZ(PGLOBAL g, UDF_ARGS *args, int i);
+static char *handle_item(UDF_INIT *initid, UDF_ARGS *args, char *result,
+	unsigned long *res_length, char *is_null, char *error);
+static char *bin_handle_item(UDF_INIT *initid, UDF_ARGS *args, char *result,
+	unsigned long *res_length, char *is_null, char *error);
 
 static uint JsonGrpSize = 10;
 
@@ -1302,7 +1306,7 @@ static my_bool CalcLen(UDF_ARGS *args, my_bool obj,
 {
 	char fn[_MAX_PATH];
   unsigned long i, k, m, n;
-	long fl= 0, j = -1;
+	long fl = 0, j = -1;
 
   reslen = args->arg_count + 2;
 
@@ -1370,7 +1374,6 @@ static my_bool CalcLen(UDF_ARGS *args, my_bool obj,
       memlen += (k + sizeof(JOBJECT) + sizeof(JPAIR));
     } else
       memlen += sizeof(JARRAY);
-
 		switch (args->arg_type[i]) {
 			case STRING_RESULT:
 				if (n == 2 && args->args[i]) {
@@ -2126,7 +2129,7 @@ my_bool json_object_nonull_init(UDF_INIT *initid, UDF_ARGS *args,
 char *json_object_nonull(UDF_INIT *initid, UDF_ARGS *args, char *result, 
                          unsigned long *res_length, char *, char *)
 {
-  char   *str= 0;
+  char   *str = NULL;
   PGLOBAL g = (PGLOBAL)initid->ptr;
 
 	if (!g->Xchk) {
@@ -2699,7 +2702,7 @@ char *json_item_merge(UDF_INIT *initid, UDF_ARGS *args, char *result,
 	} // endif Xchk
 
 	if (!CheckMemory(g, initid, args, 2, false, false, true)) {
-		PJSON top= 0;
+		PJSON top = NULL;
 		PJVAL jvp;
 		PJSON jsp[2] = {NULL, NULL};
 
@@ -3618,7 +3621,7 @@ void jsoncontains_path_deinit(UDF_INIT* initid)
 /*********************************************************************************/
 /*  This function is used by the json_set/insert/update_item functions.          */
 /*********************************************************************************/
-char *handle_item(UDF_INIT *initid, UDF_ARGS *args, char *result,
+static char *handle_item(UDF_INIT *initid, UDF_ARGS *args, char *result,
 	unsigned long *res_length, char *is_null, char *error)
 {
 	char   *p, *path, *str = NULL;
@@ -4891,7 +4894,7 @@ void jbin_item_merge_deinit(UDF_INIT* initid)
 /*********************************************************************************/
 /*  This function is used by the jbin_set/insert/update functions.               */
 /*********************************************************************************/
-char *bin_handle_item(UDF_INIT *initid, UDF_ARGS *args, char *result,
+static char *bin_handle_item(UDF_INIT *initid, UDF_ARGS *args, char *result,
 	unsigned long *res_length, char *is_null, char *error)
 {
 	char   *p, *path;
@@ -4899,7 +4902,7 @@ char *bin_handle_item(UDF_INIT *initid, UDF_ARGS *args, char *result,
 	my_bool b = true;
 	PJSON   jsp;
 	PJSNX   jsx;
-	PJVAL   jvp= 0;
+	PJVAL   jvp = NULL;
 	PBSON   bsp = NULL;
 	PGLOBAL g = (PGLOBAL)initid->ptr;
 	PGLOBAL gb = GetMemPtr(g, args, 0);

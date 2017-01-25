@@ -427,7 +427,7 @@ bool decimal_to_datetime_with_warn(const my_decimal *value, MYSQL_TIME *ltime,
 bool int_to_datetime_with_warn(bool neg, ulonglong value, MYSQL_TIME *ltime,
                                ulonglong fuzzydate, const char *field_name)
 {
-  const ErrConvInteger str(neg ? -value : value, !neg);
+  const ErrConvInteger str(neg ? - (longlong) value : (longlong) value, !neg);
   return number_to_time_with_warn(neg, value, 0, ltime,
                                   fuzzydate, &str, field_name);
 }
@@ -929,7 +929,10 @@ bool date_add_interval(MYSQL_TIME *ltime, interval_type int_type,
     my_bool neg= 0;
     enum enum_mysql_timestamp_type time_type= ltime->time_type;
 
-    if ((ulong) interval.day > MAX_DAY_NUMBER)
+    if (((ulonglong) interval.day +
+         (ulonglong) interval.hour / 24 +
+         (ulonglong) interval.minute / 24 / 60 +
+         (ulonglong) interval.second / 24 / 60 / 60) > MAX_DAY_NUMBER)
       goto invalid_date;
 
     if (time_type != MYSQL_TIMESTAMP_TIME)

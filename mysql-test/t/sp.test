@@ -1368,11 +1368,6 @@ select f10()|
 create table t4 as select 1 as id|
 select f10()|
 
-# Practical cases which we don't handle well (yet)
-#
-# Function which does not work because of well-known and documented
-# limitation of MySQL. We can't use the several instances of the
-# same temporary table in statement.
 create function f11() returns int
 begin
   drop temporary table if exists t3;
@@ -1380,9 +1375,7 @@ begin
   insert into t3 values (1), (2), (3);
   return (select count(*) from t3 as a, t3 as b);
 end|
---error ER_CANT_REOPEN_TABLE
 select f11()|
---error ER_CANT_REOPEN_TABLE
 select f11() from t1|
 # Test that using a single table instance at a time works
 create function f12_1() returns int
@@ -1397,6 +1390,7 @@ create function f12_2() returns int
 
 drop temporary table t3|
 select f12_1()|
+drop temporary table t3|
 select f12_1() from t1 limit 1|
 
 # Cleanup
@@ -8278,7 +8272,6 @@ delimiter |;
 CREATE PROCEDURE p1 () BEGIN SELECT f1 FROM t3 AS A WHERE A.f1 IN ( SELECT f1 FROM t3 ) ;
 END|
 delimiter ;|
---error ER_CANT_REOPEN_TABLE
 CALL p1;
 CREATE VIEW t3 AS SELECT f1 FROM t2 A WHERE A.f1 IN ( SELECT f1 FROM t2 );
 DROP TABLE t3;
@@ -9298,6 +9291,57 @@ CALL p1;
 DROP PROCEDURE p1;
 DROP TABLE t1;
 
+--echo #
+--echo # MDEV-10713: signal 11 error on multi-table update - crash in
+--echo # handler::increment_statistics or in make_select or assertion
+--echo # failure pfs_thread == ((PFS_thread*) pthread_getspecific((THR_PFS)))
+--echo #
+
+CREATE TABLE `t1` (
+  `CLOSE_YN` varchar(10) COLLATE utf8_bin DEFAULT NULL
+) DEFAULT CHARSET=utf8 COLLATE=utf8_bin ;
+
+
+CREATE TABLE `t2` (
+  `ap_close_to` varchar(8) COLLATE utf8_bin DEFAULT NULL
+) DEFAULT CHARSET=utf8 COLLATE=utf8_bin ;
+insert t1 values (1);
+
+
+--delimiter $$
+
+CREATE  FUNCTION `f1`(`P_DC_CD` VARBINARY(50), `P_SYS_DATE` DATETIME) RETURNS datetime
+    DETERMINISTIC
+    SQL SECURITY INVOKER
+BEGIN
+  DECLARE V_SYS_DATE DATETIME;
+  SELECT now() AS LOC_DATE INTO V_SYS_DATE ;
+  RETURN v_sys_date ;
+END $$
+
+--delimiter ;
+
+update t1 S
+JOIN
+(
+  SELECT CASE
+           WHEN DATE_FORMAT( f1('F01', NOW()) , '%Y%m%d') <= CLOSE_YMD
+             THEN '99991231'
+	     ELSE '' END ACCOUNT_APPLY_YYYYMMDD
+  FROM (
+        select case
+                 when 'AP'='AP'
+                   then ap_close_to
+                   end AS CLOSE_YMD
+	from t2
+       ) A
+) X
+SET S.CLOSE_YN = ''
+where 1=1;
+
+drop function if exists f1;
+drop table t1,t2;
+
 --echo # End of 5.5 test
 
 --echo #
@@ -9453,3 +9497,54 @@ end |
 --delimiter ;
 
 drop table t1,t2;
+
+--echo #
+--echo # MDEV-11584: GRANT inside an SP does not work well on 2nd execution
+--echo #
+
+CREATE PROCEDURE sp1()
+  GRANT ALL PRIVILEGES ON *.* TO 'foo'@'%' IDENTIFIED BY 'pass';
+CALL sp1();
+CALL sp1();
+drop user 'foo'@'%';
+drop procedure sp1;
+
+
+--echo #End of 10.1 tests
+
+--echo #
+--echo # MDEV-11081: CURSOR for query with GROUP BY
+--echo #
+
+CREATE TABLE t1 (name VARCHAR(10), value INT);
+INSERT INTO t1 VALUES ('b',1);
+INSERT INTO t1 VALUES ('b',1);
+INSERT INTO t1 VALUES ('c',1);
+INSERT INTO t1 VALUES ('a',1);
+INSERT INTO t1 VALUES ('a',1);
+INSERT INTO t1 VALUES ('a',1);
+DELIMITER |;
+CREATE PROCEDURE p1 ()
+BEGIN
+  DECLARE done INT DEFAULT FALSE;
+  DECLARE v_name VARCHAR(10);
+  DECLARE v_total INT;
+  DECLARE c CURSOR FOR
+    SELECT name, SUM(value) AS total FROM t1 GROUP BY name;
+  DECLARE CONTINUE HANDLER FOR NOT FOUND SET done = TRUE;
+  OPEN c;
+read_loop:
+  LOOP
+    FETCH c INTO v_name, v_total;
+    IF done THEN
+      LEAVE read_loop;
+    END IF;
+    SELECT v_name, v_total;
+  END LOOP;
+  CLOSE c;
+END;
+|
+DELIMITER ;|
+CALL p1();
+DROP PROCEDURE p1;
+DROP TABLE t1;

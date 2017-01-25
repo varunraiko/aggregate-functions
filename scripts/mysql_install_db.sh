@@ -29,6 +29,7 @@ args=""
 defaults=""
 mysqld_opt=""
 user=""
+silent_startup="--silent-startup"
 
 force=0
 in_rpm=0
@@ -124,7 +125,7 @@ parse_arguments()
         # where a chown of datadir won't help)
         user=`parse_arg "$arg"` ;;
       --skip-name-resolve) ip_only=1 ;;
-      --verbose) verbose=1 ;; # Obsolete
+      --verbose) verbose=1 ; silent_startup="" ;;
       --rpm) in_rpm=1 ;;
       --help) usage ;;
       --no-defaults|--defaults-file=*|--defaults-extra-file=*)
@@ -270,7 +271,8 @@ then
   extra_bindir="$basedir/extra"
   mysqld="$basedir/sql/mysqld"
   langdir="$basedir/sql/share/english"
-  pkgdatadir="$srcdir/scripts"
+  srcpkgdatadir="$srcdir/scripts"
+  buildpkgdatadir="$builddir/scripts"
   scriptdir="$srcdir/scripts"
 elif test -n "$basedir"
 then
@@ -288,8 +290,9 @@ then
     cannot_find_file errmsg.sys $basedir/share/english $basedir/share/mysql/english
     exit 1
   fi
-  pkgdatadir=`find_in_basedir --dir fill_help_tables.sql share share/mysql`
-  if test -z "$pkgdatadir"
+  srcpkgdatadir=`find_in_basedir --dir fill_help_tables.sql share share/mysql`
+  buildpkgdatadir=$srcpkgdatadir
+  if test -z "$srcpkgdatadir"
   then
     cannot_find_file fill_help_tables.sql $basedir/share $basedir/share/mysql
     exit 1
@@ -300,16 +303,17 @@ else
   bindir="@bindir@"
   extra_bindir="$bindir"
   mysqld="@libexecdir@/mysqld"
-  pkgdatadir="@pkgdatadir@"
+  srcpkgdatadir="@pkgdatadir@"
+  buildpkgdatadir="@pkgdatadir@"
   scriptdir="@scriptdir@"
 fi
 
 # Set up paths to SQL scripts required for bootstrap
-fill_help_tables="$pkgdatadir/fill_help_tables.sql"
-create_system_tables="$pkgdatadir/mysql_system_tables.sql"
-create_system_tables2="$pkgdatadir/mysql_performance_tables.sql"
-fill_system_tables="$pkgdatadir/mysql_system_tables_data.sql"
-maria_add_gis_sp="$pkgdatadir/maria_add_gis_sp_bootstrap.sql"
+fill_help_tables="$srcpkgdatadir/fill_help_tables.sql"
+create_system_tables="$srcpkgdatadir/mysql_system_tables.sql"
+create_system_tables2="$srcpkgdatadir/mysql_performance_tables.sql"
+fill_system_tables="$srcpkgdatadir/mysql_system_tables_data.sql"
+maria_add_gis_sp="$buildpkgdatadir/maria_add_gis_sp_bootstrap.sql"
 
 for f in "$fill_help_tables" "$create_system_tables" "$create_system_tables2" "$fill_system_tables" "$maria_add_gis_sp"
 do
@@ -418,7 +422,7 @@ fi
 mysqld_bootstrap="${MYSQLD_BOOTSTRAP-$mysqld}"
 mysqld_install_cmd_line()
 {
-  "$mysqld_bootstrap" $defaults "$mysqld_opt" --bootstrap \
+  "$mysqld_bootstrap" $defaults "$mysqld_opt" --bootstrap $silent_startup\
   "--basedir=$basedir" "--datadir=$ldata" --log-warnings=0 --enforce-storage-engine="" \
   $args --max_allowed_packet=8M \
   --net_buffer_length=16K
@@ -427,7 +431,7 @@ mysqld_install_cmd_line()
 
 # Create the system and help tables by passing them to "mysqld --bootstrap"
 s_echo "Installing MariaDB/MySQL system tables in '$ldata' ..."
-if { echo "use mysql;"; cat "$create_system_tables" "$create_system_tables2" "$fill_system_tables"; } | eval "$filter_cmd_line" | mysqld_install_cmd_line > /dev/null
+if { echo "use mysql;"; cat "$create_system_tables" "$create_system_tables2" "$fill_system_tables" "$fill_help_tables" "$maria_add_gis_sp"; } | eval "$filter_cmd_line" | mysqld_install_cmd_line > /dev/null
 then
   s_echo "OK"
 else
@@ -461,27 +465,6 @@ else
   echo
   exit 1
 fi
-
-s_echo "Filling help tables..."
-if { echo "use mysql;"; cat "$fill_help_tables"; } | mysqld_install_cmd_line > /dev/null
-then
-  s_echo "OK"
-else
-  echo
-  echo "WARNING: HELP FILES ARE NOT COMPLETELY INSTALLED!"
-  echo "The \"HELP\" command might not work properly."
-fi
-
-s_echo "Creating OpenGIS required SP-s..."
-if { echo "use test;"; cat "$maria_add_gis_sp"; } | mysqld_install_cmd_line > /dev/null
-then
-  s_echo "OK"
-else
-  echo
-  echo "WARNING: OPENGIS REQUIRED SP-S WERE NOT COMPLETELY INSTALLED!"
-  echo "GIS extentions might not work properly."
-fi
-
 
 # Don't output verbose information if running inside bootstrap or using
 # --srcdir for testing.  In such cases, there's no end user looking at
@@ -525,10 +508,8 @@ then
   echo "The latest information about MariaDB is available at http://mariadb.org/."
   echo "You can find additional information about the MySQL part at:"
   echo "http://dev.mysql.com"
-  echo "Support MariaDB development by buying support/new features from MariaDB"
-  echo "Corporation Ab. You can contact us about this at sales@mariadb.com."
-  echo "Alternatively consider joining our community based development effort:"
-  echo "http://mariadb.com/kb/en/contributing-to-the-mariadb-project/"
+  echo "Consider joining MariaDB's strong and vibrant community:"
+  echo "https://mariadb.org/get-involved/"
   echo
 fi
 

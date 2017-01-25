@@ -388,6 +388,21 @@ FF	FF	FF	D18F	FF
 Warnings:
 Warning	1977	Cannot convert 'cp1251' character 0x98 to 'utf8'
 DROP TABLE t1;
+SELECT strcmp('a','a '),   strcmp('a ','a');
+strcmp('a','a ')	strcmp('a ','a')
+0	0
+SELECT strcmp('a\0','a' ), strcmp('a','a\0');
+strcmp('a\0','a' )	strcmp('a','a\0')
+-1	1
+SELECT strcmp('a\0','a '), strcmp('a ','a\0');
+strcmp('a\0','a ')	strcmp('a ','a\0')
+-1	1
+SELECT strcmp('a\t','a' ), strcmp('a', 'a\t');
+strcmp('a\t','a' )	strcmp('a', 'a\t')
+-1	1
+SELECT strcmp('a\t','a '), strcmp('a ', 'a\t');
+strcmp('a\t','a ')	strcmp('a ', 'a\t')
+-1	1
 set global LC_TIME_NAMES=convert((-8388608) using cp1251);
 ERROR HY000: Unknown locale: '-8388608'
 #
@@ -1052,7 +1067,7 @@ create table t1 as select group_concat(1,2,3) as c1;
 show create table t1;
 Table	Create Table
 t1	CREATE TABLE `t1` (
-  `c1` text CHARACTER SET cp1251
+  `c1` text CHARACTER SET cp1251 DEFAULT NULL
 ) ENGINE=MyISAM DEFAULT CHARSET=latin1
 drop table t1;
 create table t1 as select 1 as c1 union select 'a';
@@ -1308,7 +1323,7 @@ show create table t1;
 Table	Create Table
 t1	CREATE TABLE `t1` (
   `c1` varchar(83) CHARACTER SET cp1251 DEFAULT NULL,
-  `c2` decimal(65,30) DEFAULT NULL
+  `c2` decimal(65,38) DEFAULT NULL
 ) ENGINE=MyISAM DEFAULT CHARSET=latin1
 drop table t1;
 select hex(concat(@@ft_max_word_len));
@@ -1658,7 +1673,7 @@ create table t1 as select concat(AsText(GeomFromText('Point(1 2)'))) as c1;
 show create table t1;
 Table	Create Table
 t1	CREATE TABLE `t1` (
-  `c1` longtext CHARACTER SET cp1251
+  `c1` longtext CHARACTER SET cp1251 DEFAULT NULL
 ) ENGINE=MyISAM DEFAULT CHARSET=latin1
 drop table t1;
 select hex(concat(period_add(200902, 2)));
@@ -3015,7 +3030,7 @@ GROUP_CONCAT(CASE WHEN a THEN a ELSE '' END)
 1234567
 SELECT COALESCE(a,'') FROM t1 GROUP BY 1;
 Catalog	Database	Table	Table_alias	Column	Column_alias	Type	Length	Max length	Is_null	Flags	Decimals	Charsetnr
-def					COALESCE(a,'')	253	9	7	Y	0	31	51
+def					COALESCE(a,'')	253	9	7	Y	0	39	51
 COALESCE(a,'')
 1234567
 # All columns must be VARCHAR(9) with the same length:
@@ -3263,11 +3278,11 @@ NULL
 id	select_type	table	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	SIMPLE	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	No tables used
 Level	Code	Message
-Note	1003	select (v_LastPaymentDate@0 < now()) AS `v_LastPaymentDate < NOW()`
+Note	1003	select v_LastPaymentDate@0 < current_timestamp() AS `v_LastPaymentDate < NOW()`
 id	select_type	table	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	SIMPLE	NULL	NULL	NULL	NULL	NULL	NULL	NULL	NULL	No tables used
 Warnings:
-Note	1003	select concat(convert(v_LastPaymentDate@0 using cp1251),now()) AS `CONCAT(v_LastPaymentDate, NOW())`
+Note	1003	select concat(convert(v_LastPaymentDate@0 using cp1251),current_timestamp()) AS `CONCAT(v_LastPaymentDate, NOW())`
 DROP PROCEDURE p1;
 #
 # Bug#52159 returning time type from function and empty left join causes debug assertion
@@ -3370,12 +3385,12 @@ EXPLAIN EXTENDED SELECT * FROM t1 WHERE a IN (1,2,3) AND a=' 1';
 id	select_type	table	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	SIMPLE	t1	ALL	NULL	NULL	NULL	NULL	2	100.00	Using where
 Warnings:
-Note	1003	select `test`.`t1`.`a` AS `a` from `test`.`t1` where ((`test`.`t1`.`a` = ' 1') and (`test`.`t1`.`a` in (1,2,3)))
+Note	1003	select `test`.`t1`.`a` AS `a` from `test`.`t1` where `test`.`t1`.`a` = ' 1' and `test`.`t1`.`a` in (1,2,3)
 EXPLAIN EXTENDED SELECT * FROM t1 WHERE a IN (1,2,3,'x') AND a=' 1';
 id	select_type	table	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	SIMPLE	t1	ALL	NULL	NULL	NULL	NULL	2	100.00	Using where
 Warnings:
-Note	1003	select `test`.`t1`.`a` AS `a` from `test`.`t1` where ((`test`.`t1`.`a` = ' 1') and (`test`.`t1`.`a` in (1,2,3,'x')))
+Note	1003	select `test`.`t1`.`a` AS `a` from `test`.`t1` where `test`.`t1`.`a` = ' 1' and `test`.`t1`.`a` in (1,2,3,'x')
 DROP TABLE t1;
 #
 # MDEV-8671 Wrong result for SELECT..WHERE varchar_column=' 1' AND (varchar_column XOR '1')
@@ -3401,7 +3416,7 @@ EXPLAIN EXTENDED SELECT * FROM t1 WHERE a=' 1' AND (a XOR '0');
 id	select_type	table	type	possible_keys	key	key_len	ref	rows	filtered	Extra
 1	SIMPLE	t1	ALL	NULL	NULL	NULL	NULL	2	100.00	Using where
 Warnings:
-Note	1003	select `test`.`t1`.`a` AS `a` from `test`.`t1` where ((`test`.`t1`.`a` = ' 1') and (`test`.`t1`.`a` xor '0'))
+Note	1003	select `test`.`t1`.`a` AS `a` from `test`.`t1` where `test`.`t1`.`a` = ' 1' and (`test`.`t1`.`a` xor '0')
 DROP TABLE t1;
 #
 # End of 10.1 tests

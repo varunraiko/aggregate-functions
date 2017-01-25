@@ -245,7 +245,8 @@ static void end_pager();
 static void init_tee(const char *);
 static void end_tee();
 static const char* construct_prompt();
-static char *get_arg(char *line, my_bool get_next_arg);
+enum get_arg_mode { CHECK, GET, GET_NEXT};
+static char *get_arg(char *line, get_arg_mode mode);
 static void init_username();
 static void add_int_to_prompt(int toadd);
 static int get_result_width(MYSQL_RES *res);
@@ -1143,6 +1144,9 @@ int main(int argc,char *argv[])
 
   outfile[0]=0;			// no (default) outfile
   strmov(pager, "stdout");	// the default, if --pager wasn't given
+
+  mysql_init(&mysql);
+
   {
     char *tmp=getenv("PAGER");
     if (tmp && strlen(tmp))
@@ -1203,7 +1207,6 @@ int main(int argc,char *argv[])
   glob_buffer.realloc(512);
   completion_hash_init(&ht, 128);
   init_alloc_root(&hash_mem_root, 16384, 0, MYF(0));
-  bzero((char*) &mysql, sizeof(mysql));
   if (sql_connect(current_host,current_db,current_user,opt_password,
 		  opt_silent))
   {
@@ -1961,7 +1964,7 @@ static int get_options(int argc, char **argv)
     connect_flag|= CLIENT_IGNORE_SPACE;
 
   if (opt_progress_reports)
-    connect_flag|= CLIENT_PROGRESS;
+    connect_flag|= CLIENT_PROGRESS_OBSOLETE;
 
   return(0);
 }
@@ -2255,7 +2258,7 @@ static COMMANDS *find_command(char *name)
       if (!my_strnncoll(&my_charset_latin1, (uchar*) name, len,
                         (uchar*) commands[i].name, len) &&
           (commands[i].name[len] == '\0') &&
-          (!end || commands[i].takes_params))
+          (!end || (commands[i].takes_params && get_arg(name, CHECK))))
       {
         index= i;
         break;
@@ -3173,7 +3176,7 @@ com_charset(String *buffer __attribute__((unused)), char *line)
   char buff[256], *param;
   CHARSET_INFO * new_cs;
   strmake_buf(buff, line);
-  param= get_arg(buff, 0);
+  param= get_arg(buff, GET);
   if (!param || !*param)
   {
     return put_info("Usage: \\C charset_name | charset charset_name", 
@@ -3492,7 +3495,6 @@ static char *fieldflags2str(uint f) {
   ff2s_check_flag(NUM);
   ff2s_check_flag(PART_KEY);
   ff2s_check_flag(GROUP);
-  ff2s_check_flag(UNIQUE);
   ff2s_check_flag(BINCMP);
   ff2s_check_flag(ON_UPDATE_NOW);
 #undef ff2s_check_flag
@@ -4259,12 +4261,12 @@ com_connect(String *buffer, char *line)
 #ifdef EXTRA_DEBUG
     tmp[1]= 0;
 #endif
-    tmp= get_arg(buff, 0);
+    tmp= get_arg(buff, GET);
     if (tmp && *tmp)
     {
       my_free(current_db);
       current_db= my_strdup(tmp, MYF(MY_WME));
-      tmp= get_arg(buff, 1);
+      tmp= get_arg(buff, GET_NEXT);
       if (tmp)
       {
 	my_free(current_host);
@@ -4367,7 +4369,7 @@ com_delimiter(String *buffer __attribute__((unused)), char *line)
   char buff[256], *tmp;
 
   strmake_buf(buff, line);
-  tmp= get_arg(buff, 0);
+  tmp= get_arg(buff, GET);
 
   if (!tmp || !*tmp)
   {
@@ -4398,7 +4400,7 @@ com_use(String *buffer __attribute__((unused)), char *line)
 
   bzero(buff, sizeof(buff));
   strmake_buf(buff, line);
-  tmp= get_arg(buff, 0);
+  tmp= get_arg(buff, GET);
   if (!tmp || !*tmp)
   {
     put_info("USE must be followed by a database name", INFO_ERROR);
@@ -4483,23 +4485,22 @@ com_nowarnings(String *buffer __attribute__((unused)),
 }
 
 /*
-  Gets argument from a command on the command line. If get_next_arg is
-  not defined, skips the command and returns the first argument. The
-  line is modified by adding zero to the end of the argument. If
-  get_next_arg is defined, then the function searches for end of string
-  first, after found, returns the next argument and adds zero to the
-  end. If you ever wish to use this feature, remember to initialize all
-  items in the array to zero first.
+  Gets argument from a command on the command line. If mode is not GET_NEXT,
+  skips the command and returns the first argument. The line is modified by
+  adding zero to the end of the argument. If mode is GET_NEXT, then the
+  function searches for end of string first, after found, returns the next
+  argument and adds zero to the end. If you ever wish to use this feature,
+  remember to initialize all items in the array to zero first.
 */
 
-char *get_arg(char *line, my_bool get_next_arg)
+static char *get_arg(char *line, get_arg_mode mode)
 {
   char *ptr, *start;
-  my_bool quoted= 0, valid_arg= 0;
+  bool short_cmd= false;
   char qtype= 0;
 
   ptr= line;
-  if (get_next_arg)
+  if (mode == GET_NEXT)
   {
     for (; *ptr; ptr++) ;
     if (*(ptr + 1))
@@ -4510,7 +4511,7 @@ char *get_arg(char *line, my_bool get_next_arg)
     /* skip leading white spaces */
     while (my_isspace(charset_info, *ptr))
       ptr++;
-    if (*ptr == '\\') // short command was used
+    if ((short_cmd= *ptr == '\\')) // short command was used
       ptr+= 2;
     else
       while (*ptr &&!my_isspace(charset_info, *ptr)) // skip command
@@ -4523,24 +4524,28 @@ char *get_arg(char *line, my_bool get_next_arg)
   if (*ptr == '\'' || *ptr == '\"' || *ptr == '`')
   {
     qtype= *ptr;
-    quoted= 1;
     ptr++;
   }
   for (start=ptr ; *ptr; ptr++)
   {
-    if (*ptr == '\\' && ptr[1]) // escaped character
+    if ((*ptr == '\\' && ptr[1]) ||  // escaped character
+        (!short_cmd && qtype && *ptr == qtype && ptr[1] == qtype)) // quote
     {
-      // Remove the backslash
-      strmov_overlapp(ptr, ptr+1);
+      // Remove (or skip) the backslash (or a second quote)
+      if (mode != CHECK)
+        strmov_overlapp(ptr, ptr+1);
+      else
+        ptr++;
     }
-    else if ((!quoted && *ptr == ' ') || (quoted && *ptr == qtype))
+    else if (*ptr == (qtype ? qtype : ' '))
     {
-      *ptr= 0;
+      qtype= 0;
+      if (mode != CHECK)
+        *ptr= 0;
       break;
     }
   }
-  valid_arg= ptr != start;
-  return valid_arg ? start : NullS;
+  return ptr != start && !qtype ? start : NullS;
 }
 
 
@@ -4642,21 +4647,25 @@ sql_real_connect(char *host,char *database,char *user,char *password,
     }
     return -1;					// Retryable
   }
-  
-  charset_info= mysql.charset;
+
+  charset_info= get_charset_by_name(mysql.charset->name, MYF(0));
+
   
   connected=1;
 #ifndef EMBEDDED_LIBRARY
-  mysql.reconnect= debug_info_flag; // We want to know if this happens
+  mysql_options(&mysql, MYSQL_OPT_RECONNECT, &debug_info_flag);
 
   /*
-    CLIENT_PROGRESS is set only if we requsted it in mysql_real_connect()
-    and the server also supports it
+    CLIENT_PROGRESS_OBSOLETE is set only if we requested it in
+    mysql_real_connect() and the server also supports it
   */
-  if (mysql.client_flag & CLIENT_PROGRESS)
+  if (mysql.client_flag & CLIENT_PROGRESS_OBSOLETE)
     mysql_options(&mysql, MYSQL_PROGRESS_CALLBACK, (void*) report_progress);
 #else
-  mysql.reconnect= 1;
+  {
+    my_bool reconnect= 1;
+    mysql_options(&mysql, MYSQL_OPT_RECONNECT, &reconnect);
+  }
 #endif
 #ifdef HAVE_READLINE
   build_completion_hash(opt_rehash, 1);
@@ -5120,17 +5129,31 @@ static const char *construct_prompt()
           processed_prompt.append("unknown");
         break;
       case 'h':
+      case 'H':
       {
-	const char *prompt;
-	prompt= connected ? mysql_get_host_info(&mysql) : "not_connected";
-	if (strstr(prompt, "Localhost"))
-	  processed_prompt.append("localhost");
-	else
-	{
-	  const char *end=strcend(prompt,' ');
-	  processed_prompt.append(prompt, (uint) (end-prompt));
-	}
-	break;
+        const char *prompt;
+        prompt= connected ? mysql_get_host_info(&mysql) : "not_connected";
+        if (strstr(prompt, "Localhost") || strstr(prompt, "localhost "))
+        {
+          if (*c == 'h')
+            processed_prompt.append("localhost");
+          else
+          {
+            static char hostname[FN_REFLEN];
+            if (hostname[0])
+              processed_prompt.append(hostname);
+            else if (gethostname(hostname, sizeof(hostname)) == 0)
+              processed_prompt.append(hostname);
+            else
+              processed_prompt.append("gethostname(2) failed");
+          }
+        }
+        else
+        {
+          const char *end=strcend(prompt,' ');
+          processed_prompt.append(prompt, (uint) (end-prompt));
+        }
+        break;
       }
       case 'p':
       {

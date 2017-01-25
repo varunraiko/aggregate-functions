@@ -36,6 +36,7 @@ Copyright (c) 2006, 2015, Percona and/or its affiliates. All rights reserved.
 
 #ident "Copyright (c) 2006, 2015, Percona and/or its affiliates. All rights reserved."
 
+#include <my_global.h>
 #include <toku_portability.h>
 
 #include <arpa/inet.h>
@@ -91,7 +92,7 @@ toku_ft_loader_set_size_factor(uint32_t factor) {
 
 uint64_t
 toku_ft_loader_get_rowset_budget_for_testing (void)
-// For test purposes only.  In production, the rowset size is determined by negotation with the cachetable for some memory.  (See #2613).
+// For test purposes only.  In production, the rowset size is determined by negotiation with the cachetable for some memory.  (See #2613).
 {
     return 16ULL*size_factor*1024ULL;
 }

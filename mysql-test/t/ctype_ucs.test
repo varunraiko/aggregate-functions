@@ -957,3 +957,63 @@ SELECT CAST(CONVERT('1Ĳ3' USING ucs2) AS SIGNED);
 --echo #
 --echo # End of 10.1 tests
 --echo #
+
+--echo #
+--echo # Start of 10.2 tests
+--echo #
+
+--echo #
+--echo # MDEV-9711 NO PAD Collatons
+--echo #
+SET character_set_connection=ucs2;
+let $coll='ucs2_general_nopad_ci';
+let $coll_pad='ucs2_general_ci';
+--source include/ctype_pad_all_engines.inc
+
+let $coll='ucs2_nopad_bin';
+let $coll_pad='ucs2_bin';
+--source include/ctype_pad_all_engines.inc
+
+--echo #
+--echo # MDEV-10585 EXECUTE IMMEDIATE statement
+--echo #
+SET character_set_connection=ucs2;
+EXECUTE IMMEDIATE 'SELECT COLLATION("a")';
+
+SET @stmt='SELECT COLLATION("a")';
+EXECUTE IMMEDIATE @stmt;
+
+--echo #
+--echo # MDEV-10866 Extend PREPARE and EXECUTE IMMEDIATE to understand expressions
+--echo #
+SET NAMES utf8, collation_connection=ucs2_bin;
+SET @stmt='SELECT COLLATION(''a'')';
+EXECUTE IMMEDIATE @stmt;
+
+SET NAMES utf8, character_set_connection=ucs2;
+SET @stmt='SELECT COLLATION(''a'')';
+EXECUTE IMMEDIATE @stmt;
+
+EXECUTE IMMEDIATE CONCAT('SELECT ''a'' FROM DUAL');
+
+SELECT HEX('aä') FROM DUAL;
+EXECUTE IMMEDIATE 'SELECT HEX(''aä'') FROM DUAL';
+EXECUTE IMMEDIATE CONCAT('SELECT HEX(''aä'') FROM DUAL');
+EXECUTE IMMEDIATE CONCAT('SELECT HEX(''aä'') FROM ', 'DUAL');
+PREPARE stmt FROM 'SELECT HEX(''aä'') FROM DUAL';
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @table='DUAL';
+SELECT HEX(@table);
+EXECUTE IMMEDIATE CONCAT('SELECT HEX(''aä'') FROM ', @table);
+EXECUTE IMMEDIATE CONCAT('SELECT HEX(''aä'') FROM ', CONVERT(@table USING utf8));
+SET @stmt='SELECT HEX(''aä'') FROM DUAL';
+EXECUTE IMMEDIATE @stmt;
+PREPARE stmt FROM @stmt;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+--echo #
+--echo # End of 10.2 tests
+--echo #

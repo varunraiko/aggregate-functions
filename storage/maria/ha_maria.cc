@@ -255,7 +255,7 @@ static MYSQL_SYSVAR_ULONG(pagecache_file_hash_size, pagecache_file_hash_size,
        "value is probably 1/10 of number of possible open Aria files.", 0,0,
        512, 128, 16384, 1);
 
-static MYSQL_SYSVAR_SET(recover, maria_recover_options, PLUGIN_VAR_OPCMDARG,
+static MYSQL_SYSVAR_SET(recover_options, maria_recover_options, PLUGIN_VAR_OPCMDARG,
        "Specifies how corrupted tables should be automatically repaired",
        NULL, NULL, HA_RECOVER_DEFAULT, &maria_recover_typelib);
 
@@ -435,8 +435,8 @@ static void _ma_check_print_msg(HA_CHECK *param, const char *msg_type,
                           NullS) - name);
   /*
     TODO: switch from protocol to push_warning here. The main reason we didn't
-    it yet is parallel repair. Due to following trace:
-    ma_check_print_msg/push_warning/sql_alloc/my_pthread_getspecific_ptr.
+    it yet is parallel repair, which threads have no THD object accessible via
+    current_thd.
 
     Also we likely need to lock mutex here (in both cases with protocol and
     push_warning).
@@ -522,6 +522,14 @@ static int table2maria(TABLE *table_arg, data_file_type row_type,
     for (j= 0; j < pos->user_defined_key_parts; j++)
     {
       Field *field= pos->key_part[j].field;
+
+      if (!table_arg->field[field->field_index]->stored_in_db())
+      {
+        my_free(*recinfo_out);
+        my_error(ER_KEY_BASED_ON_GENERATED_VIRTUAL_COLUMN, MYF(0));
+        DBUG_RETURN(HA_ERR_UNSUPPORTED);
+      }
+
       type= field->key_type();
       keydef[i].seg[j].flag= pos->key_part[j].key_part_flag;
 
@@ -549,8 +557,7 @@ static int table2maria(TABLE *table_arg, data_file_type row_type,
       keydef[i].seg[j].type= (int) type;
       keydef[i].seg[j].start= pos->key_part[j].offset;
       keydef[i].seg[j].length= pos->key_part[j].length;
-      keydef[i].seg[j].bit_start= keydef[i].seg[j].bit_end=
-        keydef[i].seg[j].bit_length= 0;
+      keydef[i].seg[j].bit_start= keydef[i].seg[j].bit_length= 0;
       keydef[i].seg[j].bit_pos= 0;
       keydef[i].seg[j].language= field->charset()->number;
 
@@ -2839,9 +2846,10 @@ int ha_maria::implicit_commit(THD *thd, bool new_trn)
   int error;
   uint locked_tables;
   DYNAMIC_ARRAY used_tables;
+  extern my_bool plugins_are_initialized;
   
   DBUG_ENTER("ha_maria::implicit_commit");
-  if (!maria_hton || !(trn= THD_TRN))
+  if (!maria_hton || !plugins_are_initialized || !(trn= THD_TRN))
     DBUG_RETURN(0);
   if (!new_trn && (thd->locked_tables_mode == LTM_LOCK_TABLES ||
                    thd->locked_tables_mode == LTM_PRELOCKED_UNDER_LOCK_TABLES))
@@ -3494,7 +3502,7 @@ static int mark_recovery_start(const char* log_dir)
   DBUG_ENTER("mark_recovery_start");
   if (!(maria_recover_options & HA_RECOVER_ANY))
     ma_message_no_user(ME_JUST_WARNING, "Please consider using option"
-                       " --aria-recover[=...] to automatically check and"
+                       " --aria-recover-options[=...] to automatically check and"
                        " repair tables when logs are removed by option"
                        " --aria-force-start-after-recovery-failures=#");
   if (recovery_failures >= force_start_after_recovery_failures)
@@ -3701,7 +3709,7 @@ struct st_mysql_sys_var* system_variables[]= {
   MYSQL_SYSVAR(pagecache_buffer_size),
   MYSQL_SYSVAR(pagecache_division_limit),
   MYSQL_SYSVAR(pagecache_file_hash_size),
-  MYSQL_SYSVAR(recover),
+  MYSQL_SYSVAR(recover_options),
   MYSQL_SYSVAR(repair_threads),
   MYSQL_SYSVAR(sort_buffer_size),
   MYSQL_SYSVAR(stats_method),

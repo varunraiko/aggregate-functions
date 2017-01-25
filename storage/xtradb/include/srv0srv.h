@@ -1,9 +1,9 @@
 /*****************************************************************************
 
-Copyright (c) 1995, 2015, Oracle and/or its affiliates.
+Copyright (c) 1995, 2016, Oracle and/or its affiliates. All rights reserved.
 Copyright (c) 2008, 2009, Google Inc.
 Copyright (c) 2009, Percona Inc.
-Copyright (c) 2013, 2014, SkySQL Ab. All Rights Reserved.
+Copyright (c) 2013, 2017, MariaDB Corporation
 
 Portions of this file contain modifications contributed and copyrighted by
 Google, Inc. Those modifications are gratefully acknowledged and are described
@@ -186,6 +186,12 @@ struct srv_stats_t {
 	/** Number of lock waits that have been up to max time (i.e.) lock
 	wait timeout */
 	ulint_ctr_1_t		n_lock_max_wait_time;
+
+	/** Number of times page 0 is read from tablespace */
+	ulint_ctr_64_t		page0_read;
+
+	/** Number of encryption_get_latest_key_version calls */
+	ulint_ctr_64_t		n_key_requests;
 };
 
 extern const char*	srv_main_thread_op_info;
@@ -222,8 +228,10 @@ extern os_event_t	srv_checkpoint_completed_event;
 log tracking iteration */
 extern os_event_t	srv_redo_log_tracked_event;
 
-/** srv_redo_log_follow_thread spawn flag */
-extern bool srv_redo_log_thread_started;
+/** Whether the redo log tracker thread has been started. Does not take into
+account whether the tracking is currently enabled (see srv_track_changed_pages
+for that) */
+extern bool		srv_redo_log_thread_started;
 
 /* If the last data file is auto-extended, we add this many pages to it
 at a time */
@@ -297,9 +305,6 @@ use simulated aio we build below with threads.
 Currently we support native aio on windows and linux */
 extern my_bool	srv_use_native_aio;
 extern my_bool	srv_numa_interleave;
-#ifdef __WIN__
-extern ibool	srv_use_native_conditions;
-#endif /* __WIN__ */
 #endif /* !UNIV_HOTBACKUP */
 
 /* Use trim operation */
@@ -341,11 +346,17 @@ extern char**	srv_data_file_names;
 extern ulint*	srv_data_file_sizes;
 extern ulint*	srv_data_file_is_raw_partition;
 
+/** Whether the redo log tracking is currently enabled. Note that it is
+possible for the log tracker thread to be running and the tracking to be
+disabled */
 extern my_bool		srv_track_changed_pages;
 extern ulonglong	srv_max_bitmap_file_size;
 
 extern
 ulonglong       srv_max_changed_pages;
+
+extern uint	srv_n_fil_crypt_threads;
+extern uint	srv_n_fil_crypt_threads_started;
 
 extern ibool	srv_auto_extend_last_data_file;
 extern ulint	srv_last_file_size_max;
@@ -565,19 +576,17 @@ extern ibool	srv_print_verbose_log;
 	"tables instead, see " REFMAN "innodb-i_s-tables.html"
 extern ibool	srv_print_innodb_table_monitor;
 
-extern ibool	srv_monitor_active;
-extern ibool	srv_error_monitor_active;
+extern bool	srv_monitor_active;
+extern bool	srv_error_monitor_active;
 
 /* TRUE during the lifetime of the buffer pool dump/load thread */
-extern ibool	srv_buf_dump_thread_active;
+extern bool	srv_buf_dump_thread_active;
 
 /* TRUE during the lifetime of the stats thread */
-extern ibool	srv_dict_stats_thread_active;
+extern bool	srv_dict_stats_thread_active;
 
 /* TRUE if enable log scrubbing */
 extern my_bool	srv_scrub_log;
-/* TRUE during the lifetime of the log scrub thread */
-extern ibool	srv_log_scrub_thread_active;
 
 extern ulong	srv_n_spin_wait_rounds;
 extern ulong	srv_n_free_tickets_to_enter;
@@ -587,6 +596,9 @@ extern ibool	srv_priority_boost;
 
 extern ulint	srv_truncated_status_writes;
 extern ulint	srv_available_undo_logs;
+
+extern ulint	srv_column_compressed;
+extern ulint	srv_column_decompressed;
 
 extern	ulint	srv_mem_pool_size;
 extern	ulint	srv_lock_table_size;
@@ -611,6 +623,7 @@ extern my_bool	srv_ibuf_disable_background_merge;
 
 #ifdef UNIV_DEBUG
 extern my_bool	srv_purge_view_update_only_debug;
+extern uint	srv_sys_space_size_debug;
 #endif /* UNIV_DEBUG */
 
 #define SRV_SEMAPHORE_WAIT_EXTENSION	7200
@@ -1035,7 +1048,7 @@ UNIV_INTERN
 os_thread_ret_t
 DECLARE_THREAD(srv_purge_coordinator_thread)(
 /*=========================================*/
-	void*	arg __attribute__((unused)));	/*!< in: a dummy parameter
+	void*	arg MY_ATTRIBUTE((unused)));	/*!< in: a dummy parameter
 						required by os_thread_create */
 
 /*********************************************************************//**
@@ -1045,7 +1058,7 @@ UNIV_INTERN
 os_thread_ret_t
 DECLARE_THREAD(srv_worker_thread)(
 /*==============================*/
-	void*	arg __attribute__((unused)));	/*!< in: a dummy parameter
+	void*	arg MY_ATTRIBUTE((unused)));	/*!< in: a dummy parameter
 						required by os_thread_create */
 } /* extern "C" */
 
@@ -1068,15 +1081,6 @@ srv_release_threads(
 /*================*/
 	enum srv_thread_type	type,	/*!< in: thread type */
 	ulint			n);	/*!< in: number of threads to release */
-
-/**********************************************************************//**
-Check whether any background thread are active. If so print which thread
-is active. Send the threads wakeup signal.
-@return name of thread that is active or NULL */
-UNIV_INTERN
-const char*
-srv_any_background_threads_are_active(void);
-/*=======================================*/
 
 /**********************************************************************//**
 Wakeup the purge threads. */
@@ -1161,7 +1165,8 @@ struct export_var_t{
 	ulint innodb_os_log_pending_fsyncs;	/*!< fil_n_pending_log_flushes */
 	ulint innodb_page_size;			/*!< UNIV_PAGE_SIZE */
 	ulint innodb_pages_created;		/*!< buf_pool->stat.n_pages_created */
-	ulint innodb_pages_read;		/*!< buf_pool->stat.n_pages_read */
+	ulint innodb_pages_read;		/*!< buf_pool->stat.n_pages_read*/
+	ulint innodb_page0_read;		/*!< srv_stats.page0_read */
 	ulint innodb_pages_written;		/*!< buf_pool->stat.n_pages_written */
 	ib_int64_t innodb_purge_trx_id;
 	ib_int64_t innodb_purge_undo_no;
@@ -1215,6 +1220,8 @@ struct export_var_t{
 	ulint innodb_purge_view_trx_id_age;	/*!< rw_max_trx_id
 						- purged view's min trx_id */
 #endif /* UNIV_DEBUG */
+	ulint innodb_column_compressed;		/*!< srv_column_compressed */
+	ulint innodb_column_decompressed;	/*!< srv_column_decompressed */
 
 	ib_int64_t innodb_page_compression_saved;/*!< Number of bytes saved
 						by page compression */
@@ -1260,6 +1267,7 @@ struct export_var_t{
 	ulint innodb_encryption_rotation_pages_modified;
 	ulint innodb_encryption_rotation_pages_flushed;
 	ulint innodb_encryption_rotation_estimated_iops;
+	ib_int64_t innodb_encryption_key_requests;
 
 	ulint innodb_scrub_page_reorganizations;
 	ulint innodb_scrub_page_splits;

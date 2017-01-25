@@ -166,20 +166,8 @@ const TABLE_FIELD_TYPE event_table_fields[ET_FIELD_COUNT] =
 static const TABLE_FIELD_DEF
 event_table_def= {ET_FIELD_COUNT, event_table_fields, 0, (uint*) 0};
 
-class Event_db_intact : public Table_check_intact
-{
-protected:
-  void report_error(uint, const char *fmt, ...)
-  {
-    va_list args;
-    va_start(args, fmt);
-    error_log_print(ERROR_LEVEL, fmt, args);
-    va_end(args);
-  }
-};
-
 /** In case of an error, a message is printed to the error log. */
-static Event_db_intact table_intact;
+static Table_check_intact_log_error table_intact;
 
 
 /**
@@ -202,7 +190,7 @@ mysql_event_fill_row(THD *thd,
                      TABLE *table,
                      Event_parse_data *et,
                      sp_head *sp,
-                     ulonglong sql_mode,
+                     sql_mode_t sql_mode,
                      my_bool is_update)
 {
   CHARSET_INFO *scs= system_charset_info;
@@ -499,7 +487,8 @@ Event_db_repository::table_scan_all_for_i_s(THD *thd, TABLE *schema_table,
   READ_RECORD read_record_info;
   DBUG_ENTER("Event_db_repository::table_scan_all_for_i_s");
 
-  if (init_read_record(&read_record_info, thd, event_table, NULL, 1, 0, FALSE))
+  if (init_read_record(&read_record_info, thd, event_table, NULL, NULL, 1, 0,
+                       FALSE))
     DBUG_RETURN(TRUE);
 
   /*
@@ -657,7 +646,7 @@ Event_db_repository::create_event(THD *thd, Event_parse_data *parse_data,
   int ret= 1;
   TABLE *table= NULL;
   sp_head *sp= thd->lex->sphead;
-  ulonglong saved_mode= thd->variables.sql_mode;
+  sql_mode_t saved_mode= thd->variables.sql_mode;
   /*
     Take a savepoint to release only the lock on mysql.event
     table at the end but keep the global read lock and
@@ -786,7 +775,7 @@ Event_db_repository::update_event(THD *thd, Event_parse_data *parse_data,
   CHARSET_INFO *scs= system_charset_info;
   TABLE *table= NULL;
   sp_head *sp= thd->lex->sphead;
-  ulonglong saved_mode= thd->variables.sql_mode;
+  sql_mode_t saved_mode= thd->variables.sql_mode;
   /*
     Take a savepoint to release only the lock on mysql.event
     table at the end but keep the global read lock and
@@ -1015,7 +1004,7 @@ Event_db_repository::drop_schema_events(THD *thd, LEX_STRING schema)
     DBUG_VOID_RETURN;
 
   /* only enabled events are in memory, so we go now and delete the rest */
-  if (init_read_record(&read_record_info, thd, table, NULL, 1, 0, FALSE))
+  if (init_read_record(&read_record_info, thd, table, NULL, NULL, 1, 0, FALSE))
     goto end;
 
   while (!ret && !(read_record_info.read_record(&read_record_info)) )
