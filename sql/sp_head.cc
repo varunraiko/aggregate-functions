@@ -4604,7 +4604,7 @@ sp_instr_cfetch::execute(THD *thd, uint *nextp)
         *nextp = m_ip+1;
     }
   }
-  return res;
+  DBUG_RETURN(res);
 }
 
 void
