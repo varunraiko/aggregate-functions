@@ -1249,6 +1249,12 @@ public:
   bool add();
   bool sp_check_access(THD *thd);
 
+  enum_field_types field_type() const
+  { return sp_result_field->type(); }
+
+  Item* get_copy(THD *thd, MEM_ROOT *mem_root)
+  { return get_item_copy<Item_sum_sp>(thd, mem_root, this); }
+
   /* val_xx functions */
   longlong val_int()
   {
