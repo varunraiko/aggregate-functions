@@ -194,7 +194,7 @@ counter	id	agg_sum(sal)	agg_sum(sal)
 5	1	7000	7000
 7	5	10000	10000
 9	6	10000	10000
-select counter, id, agg_sum(sal), sum(distinct sal) from t1 where id>= 1 group by id order by counter desc;
+select counter, id, agg_sum(sal), sum(distinct sal) from t1 where id>= 1 group by id order by counter desc, id;
 counter	id	agg_sum(sal)	sum(distinct sal)
 9	6	10000	10000
 7	5	10000	10000

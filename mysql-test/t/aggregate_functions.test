@@ -196,7 +196,7 @@ select counter, agg_sum(sal) from t1 where id>= 1 group by counter;
 select val, agg_sum(sal) from t1 where id>= 1 group by val;
 select counter, agg_sum(sal) from t1 where id>= 1 group by id order by counter;
 select counter, id, agg_sum(sal), agg_sum(sal) from t1 where id>= 1 group by id order by counter;
-select counter, id, agg_sum(sal), sum(distinct sal) from t1 where id>= 1 group by id order by counter desc;
+select counter, id, agg_sum(sal), sum(distinct sal) from t1 where id>= 1 group by id order by counter desc, id;
 select val, counter, id, agg_sum(sal), sum(distinct sal), agg_min(sal), agg_max(sal), agg_avg(sal) from t1 where id>= 1 group by id, val order by counter, val, id;
 
 ##### insert aggregate function value into a table ######

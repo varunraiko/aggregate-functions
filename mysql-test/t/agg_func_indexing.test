@@ -35,7 +35,7 @@ select id, agg_sum(sal) from t1 where id>= 1 group by val;
 select id, agg_sum(sal) from t1 where id>= 1 group by counter order by counter;
 select id, agg_sum(sal) from t1 where id>= 1 group by counter order by val;
 select id, agg_sum(sal) from t1 where id>= 1 group by counter order by id;
-select id, agg_sum(sal) from t1 where id>= 1 group by val order by counter;
+select id, agg_sum(sal) from t1 where id>= 1 group by val order by counter, id;
 select id, agg_sum(sal) from t1 where id>= 1 group by val order by id;
 select id, agg_sum(sal) from t1 where id>= 1 group by val order by val;
 drop table t1;
