@@ -531,28 +531,26 @@ void JOIN::extract_condition_for_the_nest(Mat_join_tab_nest_info* nest_info)
     join orders that could satisfy the ORDER BY clause.
 */
 
-void JOIN::propagate_equal_field_for_orderby()
+void JOIN::propagate_equal_fields_for_order_by()
 {
-  if (!sort_nest_possible)
+  if (!sort_nest_possible ||
+      !(optimizer_flag(thd, OPTIMIZER_SWITCH_ORDERBY_EQ_PROP) && cond_equal))
     return;
   ORDER *ord;
   for (ord= order; ord; ord= ord->next)
   {
-    if (optimizer_flag(thd, OPTIMIZER_SWITCH_ORDERBY_EQ_PROP) && cond_equal)
-    {
-      Item *item= ord->item[0];
-      /*
-        TODO: equality substitution in the context of ORDER BY is
-        sometimes allowed when it is not allowed in the general case.
-        We make the below call for its side effect: it will locate the
-        multiple equality the item belongs to and set item->item_equal
-        accordingly.
-      */
-      (void)item->propagate_equal_fields(thd,
-                                         Value_source::
-                                         Context_identity(),
-                                         cond_equal);
-    }
+    Item *item= ord->item[0];
+    /*
+      TODO: equality substitution in the context of ORDER BY is
+      sometimes allowed when it is not allowed in the general case.
+      We make the below call for its side effect: it will locate the
+      multiple equality the item belongs to and set item->item_equal
+      accordingly.
+    */
+    (void)item->propagate_equal_fields(thd,
+                                       Value_source::
+                                       Context_identity(),
+                                       cond_equal);
   }
 }
 
@@ -737,7 +735,7 @@ bool JOIN::make_sort_nest(Mat_join_tab_nest_info *nest_info)
   JOIN_TAB *tab;
 
   if (unlikely(thd->trace_started()))
-    add_nest_tables_to_trace(nest_info);
+    trace_tables_in_nest(nest_info);
 
   /*
     List of field items of the tables inside the sort-nest is created for
@@ -941,10 +939,10 @@ void JOIN_TAB::find_keys_that_can_achieve_ordering()
   for (uint index= 0; index < table->s->keys; index++)
   {
     if (table->keys_in_use_for_query.is_set(index) &&
+        table->keys_in_use_for_order_by.is_set(index) &&
         test_if_order_by_key(join, join->order, table, index))
       table->keys_with_ordering.set_bit(index);
   }
-  table->keys_with_ordering.intersect(table->keys_in_use_for_order_by);
 }
 
 
@@ -971,7 +969,7 @@ bool JOIN_TAB::needs_filesort(uint idx, int index_used)
   if (idx != join->const_tables)
     return TRUE;
 
-  return !check_if_index_satisfies_ordering(index_used);
+  return !check_if_index_achieves_ordering(index_used);
 }
 
 
@@ -1018,7 +1016,7 @@ int get_best_index_for_order_by_limit(JOIN_TAB *tab,
 {
   double cardinality;
   JOIN *join= tab->join;
-  cardinality= join->cardinality_estimate;
+  cardinality= join->join_cardinality_estimate;
   /**
     Cases when there is no need to consider indexes that can resolve the
     ORDER BY clause
@@ -1083,7 +1081,7 @@ int get_best_index_for_order_by_limit(JOIN_TAB *tab,
     with the access picked first.
     Index scan would not help in comparison with ref access.
   */
-  if (tab->check_if_index_satisfies_ordering(index_used))
+  if (tab->check_if_index_achieves_ordering(index_used))
   {
     if (!table->opt_range_keys.is_set(static_cast<uint>(index_used)))
     {
@@ -1148,7 +1146,7 @@ bool JOIN::is_join_buffering_allowed(JOIN_TAB *tab)
     FALSE otherwise
 */
 
-bool JOIN_TAB::check_if_index_satisfies_ordering(int index_used)
+bool JOIN_TAB::check_if_index_achieves_ordering(int index_used)
 {
   /*
     index_used is set to
@@ -1305,7 +1303,7 @@ void JOIN::setup_index_use_for_ordering(int index)
          (cur_pos->table->quick ? cur_pos->table->quick->index : -1) :
           index;
 
-  if (tab->check_if_index_satisfies_ordering(index))
+  if (tab->check_if_index_achieves_ordering(index))
   {
     if (tab->table->opt_range_keys.is_set(index))
     {
@@ -1368,13 +1366,13 @@ void JOIN::set_fraction_output_for_nest()
 {
   if (sort_nest_possible && !get_cardinality_estimate)
   {
-    fraction_output_for_nest= select_limit < cardinality_estimate ?
-                              select_limit / cardinality_estimate :
+    fraction_output_for_nest= select_limit < join_cardinality_estimate ?
+                              select_limit / join_cardinality_estimate :
                               1.0;
     if (unlikely(thd->trace_started()))
     {
       Json_writer_object trace_limit(thd);
-      trace_limit.add("cardinality", cardinality_estimate);
+      trace_limit.add("cardinality", join_cardinality_estimate);
       trace_limit.add("selectivity_of_limit", fraction_output_for_nest*100);
     }
   }

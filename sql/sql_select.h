@@ -695,7 +695,7 @@ typedef struct st_join_table {
                      bool is_const_table);
   int get_index_on_table();
   void find_keys_that_can_achieve_ordering();
-  bool check_if_index_satisfies_ordering(int index_used);
+  bool check_if_index_achieves_ordering(int index_used);
   bool needs_filesort(uint idx, int index_used);
 } JOIN_TAB;
 
@@ -1669,7 +1669,7 @@ public:
     Set to the estimate of the rows that the join planner expects to be in the
     output of the join.
   */
-  double cardinality_estimate;
+  double join_cardinality_estimate;
 
   /*
     The fraction of records we would read of the sort-nest or the first table
@@ -1784,7 +1784,7 @@ public:
     fraction_output_for_nest= 1;
     prefix_resolves_ordering= FALSE;
     get_cardinality_estimate= FALSE;
-    cardinality_estimate= DBL_MAX;
+    join_cardinality_estimate= DBL_MAX;
   }
 
   /* True if the plan guarantees that it will be returned zero or one row */
@@ -1955,7 +1955,7 @@ public:
 
   bool sort_nest_allowed();
   bool is_order_by_expensive();
-  void estimate_cardinality_for_join(table_map joined_tables);
+  double estimate_cardinality_for_join();
   double multi_eq_join_cond_selectivity();
   bool check_if_sort_nest_present(uint* n_tables, table_map *tables_map);
   bool create_sort_nest_info(uint n_tables, table_map nest_tables_map);
@@ -1969,7 +1969,7 @@ public:
   void substitutions_for_sjm_lookup(JOIN_TAB *sjm_tab,
                                     Mat_join_tab_nest_info* nest_info);
   void extract_condition_for_the_nest(Mat_join_tab_nest_info* nest_info);
-  void propagate_equal_field_for_orderby();
+  void propagate_equal_fields_for_order_by();
   void setup_index_use_for_ordering(int index_no);
   void setup_range_scan(JOIN_TAB *tab, uint idx, double records);
   bool is_join_buffering_allowed(JOIN_TAB *tab);

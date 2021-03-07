@@ -7285,13 +7285,13 @@ bool Item_equal::predicate_selectivity_checker(void *arg)
 
 /*
   @brief
-  Check whether statistics are available for any of the fields in an Item_equal
+  Check whether range statistics are available for a multiple equality
 
   @retval
     TRUE:  statistics available
     FALSE: OTHERWISE
 */
-bool Item_equal::is_statistics_available()
+bool Item_equal::is_range_statistics_available()
 {
   Item_equal_fields_iterator it(*this);
   while (it++)

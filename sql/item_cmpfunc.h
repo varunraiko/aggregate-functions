@@ -3237,7 +3237,7 @@ public:
   friend class Item_equal_fields_iterator;
   bool count_sargable_conds(void *arg);
   bool predicate_selectivity_checker(void *arg);
-  bool is_statistics_available();
+  bool is_range_statistics_available();
   Item *multiple_equality_transformer(THD *thd, uchar *arg);
   friend class Item_equal_iterator<List_iterator_fast,Item>;
   friend class Item_equal_iterator<List_iterator,Item>;

@@ -697,7 +697,7 @@ void print_best_access_for_table(THD *thd, POSITION *pos,
     Currently this is used for the SORT-NEST used in the ORDER BY LIMIT
     optimization
 */
-void add_nest_tables_to_trace(Mat_join_tab_nest_info* nest_info)
+void trace_tables_in_nest(Mat_join_tab_nest_info* nest_info)
 {
   JOIN_TAB *end_tab;
   JOIN *join= nest_info->get_join();

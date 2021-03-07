@@ -11036,7 +11036,7 @@ bool Item::is_resolved_by_same_column(void *arg)
     same_field_arg->is_stats_available=
              (field->is_range_statistics_available() ||
              (get_item_equal() &&
-              get_item_equal()->is_statistics_available()));
+              get_item_equal()->is_range_statistics_available()));
     return true;
   }
 

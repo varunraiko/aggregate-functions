@@ -2968,7 +2968,7 @@ int JOIN::optimize_stage2()
         int idx= first_tab->get_index_on_table();
 
         if (first_tab == join_tab + const_tables &&
-            first_tab->check_if_index_satisfies_ordering(idx))
+            first_tab->check_if_index_achieves_ordering(idx))
         {
           resetup_access_for_ordering(first_tab, idx);
           ordered_index_usage= ordered_index_order_by;
@@ -5378,7 +5378,7 @@ make_join_statistics(JOIN *join, List<TABLE_LIST> &tables_list,
     DBUG_RETURN(TRUE);
 
   join->sort_nest_possible= join->sort_nest_allowed();
-  join->propagate_equal_field_for_orderby();
+  join->propagate_equal_fields_for_order_by();
 
   join->join_tab= stat;
   join->make_notnull_conds_for_range_scans();
@@ -7903,7 +7903,7 @@ best_access_path(JOIN      *join,
       double cost_of_sorting= 0;
       if (join->is_index_with_ordering_allowed(idx))
       {
-        if (!s->check_if_index_satisfies_ordering(start_key->key))
+        if (!s->check_if_index_achieves_ordering(start_key->key))
         {
           double sort_cost;
           sort_cost= join->sort_nest_oper_cost(records, idx,
@@ -8242,7 +8242,7 @@ best_access_path(JOIN      *join,
   double idx_time= best;
   if (join->is_index_with_ordering_allowed(idx))
   {
-    if (s->check_if_index_satisfies_ordering(index_picked))
+    if (s->check_if_index_achieves_ordering(index_picked))
     {
       /*
         Removing the selectivity of limit taken into account for an access
@@ -8497,12 +8497,12 @@ choose_plan(JOIN *join, table_map join_tables)
     wrapper.add("cardinality_accurate", cardinality_accurate);
     if (!cardinality_accurate)
       join->sort_nest_possible= false;
+  }
 
-    if (join->sort_nest_possible)
-    {
-      join->estimate_cardinality_for_join(join_tables);
-      wrapper.add("cardinality_estimate", join->cardinality_estimate);
-    }
+  if (join->sort_nest_possible)
+  {
+    join->join_cardinality_estimate= join->estimate_cardinality_for_join();
+    wrapper.add("cardinality_estimate", join->join_cardinality_estimate);
   }
 
   Json_writer_array trace_plan(thd,"considered_execution_plans");
@@ -9977,7 +9977,7 @@ best_extension_by_limited_search(JOIN      *join,
       index_used= position->index_no;
       if ((join->table_count - join->const_tables == 1) &&
           join->is_index_with_ordering_allowed(idx) &&
-          s->check_if_index_satisfies_ordering(index_used))
+          s->check_if_index_achieves_ordering(index_used))
       {
         position->sort_nest_operation_here= TRUE;
       }
@@ -10068,7 +10068,7 @@ best_extension_by_limited_search(JOIN      *join,
         swap_variables(JOIN_TAB*, join->best_ref[idx], *pos);
 
         if (join->is_index_with_ordering_allowed(idx) &&
-            s->check_if_index_satisfies_ordering(index_used))
+            s->check_if_index_achieves_ordering(index_used))
         {
           limit_applied_to_nest= TRUE;
           sort_nest_records= partial_join_cardinality;
@@ -10105,7 +10105,7 @@ best_extension_by_limited_search(JOIN      *join,
                                                sort_nest_records))
             DBUG_RETURN(TRUE);
           if (!(join->is_index_with_ordering_allowed(idx) &&
-              s->check_if_index_satisfies_ordering(index_used)))
+              s->check_if_index_achieves_ordering(index_used)))
           join->positions[idx].sort_nest_operation_here= FALSE;
           trace_rest.end();
         }
@@ -29764,45 +29764,38 @@ bool JOIN::is_order_by_expensive()
 }
 
 
-
 /*
   @brief
    Estimate the cardinality for a join
 
-  @param
-    joined_tables            map of all the non-const tables of the join
-
   @details
-    Run the join planner to get an estimate of cardinality for a join.
+    This function makes an estimate of the JOIN when the query has a subset
+    of where clause for which join output cardinality can be estimated
+    precisely.
 
   @note
     This is currently used by the ORDER BY LIMIT optimization with the
-    sort-nest. This is a very expensive way to compute cardinality.
+    sort-nest.
 
     The cardinality of the join remains the same irrespective of the way the
     tables are joined theoretically but that is not the case with our join
     planner.
 
-    Still we would like to speed this process of getting the estimates of
-    cardinality for a join by reducing the number of permutations of
-    join orders to be considered. We can do this by running the join planner
-    with a small value for system variable optimizer_search_depth.
+  @retval
+    Returns the estimate of join output cardinality
 */
 
-void JOIN::estimate_cardinality_for_join(table_map joined_tables)
+double JOIN::estimate_cardinality_for_join()
 {
-  /*
-    cardinality_estimate should be set to the value of the estimate join
-    output cardinality
-  */
-  cardinality_estimate= 1;
+  double cardinality_estimate= 1;
   JOIN_TAB *tab;
-  cardinality_estimate*= multi_eq_join_cond_selectivity();
   for (JOIN_TAB **pos= best_ref; (tab= *pos) ; pos++)
   {
     TABLE *table= tab->table;
-    cardinality_estimate*= (table->stat_records() * table->cond_selectivity);
+    cardinality_estimate*=(table->stat_records() * table->cond_selectivity);
   }
+  cardinality_estimate*= multi_eq_join_cond_selectivity();
+  return cardinality_estimate;
 }
 
 
