@@ -30332,6 +30332,32 @@ bool is_range_predicate(Item *item, Item *value)
 }
 
 
+/*
+@brief
+  Substitute ON expressions with nest fields
+*/
+void substitution_for_on_expressions(THD *thd, Item_transformer transformer,
+                                     bool transform_subquery, uchar *arg,
+                                     List<TABLE_LIST> *join_list)
+{
+  List_iterator<TABLE_LIST> li(*join_list);
+  TABLE_LIST *tbl;
+  while ((tbl= li++))
+  {
+    if (tbl->on_expr)
+    {
+      if (tbl->nested_join)
+      {
+        substitution_for_on_expressions(thd, transformer, transform_subquery,
+                                        arg, &tbl->nested_join->join_list);
+      }
+      tbl->on_expr= (tbl->on_expr)->transform(thd, transformer,
+                                              transform_subquery, arg);
+    }
+  }
+}
+
+
 /**
   @} (end of group Query_Optimizer)
 */

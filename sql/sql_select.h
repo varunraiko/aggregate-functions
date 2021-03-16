@@ -2084,6 +2084,10 @@ bool simple_pred(Item_func *func_item, Item **args, bool *inv_order);
 int opt_sum_query(THD* thd,
                   List<TABLE_LIST> &tables, List<Item> &all_fields, COND *conds);
 
+void substitution_for_on_expressions(THD *thd, Item_transformer transformer,
+                                     bool transform_subquery, uchar *arg,
+                                     List<TABLE_LIST> *join_list);
+
 /* from sql_delete.cc, used by opt_range.cc */
 extern "C" int refpos_order_cmp(void* arg, const void *a,const void *b);
 
