@@ -11363,18 +11363,18 @@ void Field::print_key_value_binary(String *out, const uchar* key, uint32 length)
 
 /*
   @brief
-    Check if statistics for a column are available via keys
+    Set if statistics for a column are available via keys
 
   @details
     If the column is the first component of a key, then statistics
     for the column are available from the range optimizer.
-    Sets the bit in Field::stats_table
-      a)  Number of distinct values(NDV) is available
+    Sets the bit in Field::stats_available
+      a) Number of distinct values(NDV) is available
       b) Statistics are available for the non-const argument of a
          range predicate
 */
 
-void Field::statistics_available_via_keys()
+void Field::set_if_statistics_available_via_keys()
 {
   uint key;
   key_map::Iterator it(key_start);
@@ -11394,10 +11394,15 @@ void Field::statistics_available_via_keys()
 
 /*
   @brief
-    Check if statistics for a column are available via stat tables
+    Set if statistics for a column are available via stat tables
+  @details
+    Sets the bit in Field::stats_available
+    a) Number of distinct values(NDV) is available
+    b) Statistics are available for the non-const argument of a
+       range predicate
 */
 
-void Field::statistics_available_via_stat_tables()
+void Field::set_if_statistics_available_via_stat_tables()
 {
   THD *thd= get_thd();
   if (thd->variables.optimizer_use_condition_selectivity > 2 &&
@@ -11434,8 +11439,8 @@ bool Field::is_range_statistics_available()
 {
   if (!stats_available)
   {
-    statistics_available_via_keys();
-    statistics_available_via_stat_tables();
+    set_if_statistics_available_via_keys();
+    set_if_statistics_available_via_stat_tables();
     stats_available|= (1 << STATISTICS_CACHED);
   }
 

@@ -786,8 +786,8 @@ Item* Item_subselect::transform(THD *thd, Item_transformer transformer,
         lex->having->update_used_tables();
       }
 
-      transform_on_expressions(thd, transformer, transform_subquery,
-                               arg, lex->join_list);
+      substitution_for_on_expressions(thd, transformer, transform_subquery,
+                                      arg, lex->join_list);
 
       while ((item=it++))
       {

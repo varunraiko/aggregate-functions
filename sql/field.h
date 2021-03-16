@@ -1921,8 +1921,8 @@ public:
   /* Mark field in read map. Updates also virtual fields */
   void register_field_in_read_map();
 
-  void statistics_available_via_keys();
-  void statistics_available_via_stat_tables();
+  void set_if_statistics_available_via_keys();
+  void set_if_statistics_available_via_stat_tables();
   bool is_range_statistics_available();
   bool is_ndv_available();
   bool is_ndv_available_via_stat_tables();
